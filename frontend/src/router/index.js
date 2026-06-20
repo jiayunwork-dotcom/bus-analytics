@@ -11,6 +11,7 @@ const routes = [
   { path: '/vehicles', name: 'Vehicles', component: () => import('../views/Vehicles.vue') },
   { path: '/network', name: 'Network', component: () => import('../views/Network.vue') },
   { path: '/compare', name: 'Compare', component: () => import('../views/Compare.vue') },
+  { path: '/compare/health', name: 'LineHealth', component: () => import('../views/LineHealth.vue') },
 ]
 
 const router = createRouter({

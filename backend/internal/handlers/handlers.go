@@ -300,3 +300,12 @@ func (h *Handler) GetDateRange(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+func (h *Handler) GetLineHealthScores(c *gin.Context) {
+	scores, err := h.comparisonSvc.GetLineHealthScores()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, scores)
+}

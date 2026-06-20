@@ -54,6 +54,7 @@ func main() {
 
 		api.POST("/compare/lines", h.CompareLines)
 		api.GET("/compare/lines/:lineNo/historical", h.GetLineHistoricalTrend)
+		api.GET("/compare/health-scores", h.GetLineHealthScores)
 
 		api.POST("/report/export", h.ExportReport)
 	}

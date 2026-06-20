@@ -41,6 +41,7 @@ export default {
 
   compareLines: (lineNos) => api.post('/compare/lines', { line_nos: lineNos }),
   getHistoricalTrend: (lineNo, params) => api.get(`/compare/lines/${lineNo}/historical`, { params }),
+  getLineHealthScores: () => api.get('/compare/health-scores'),
 
   exportReport: (lineNos) => api.post('/report/export', { line_nos: lineNos }, {
     responseType: 'blob'

@@ -44,6 +44,10 @@
           <el-icon><Rank /></el-icon>
           <span>对标分析</span>
         </el-menu-item>
+        <el-menu-item index="/compare/health">
+          <el-icon><Medal /></el-icon>
+          <span>线路健康度评分</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

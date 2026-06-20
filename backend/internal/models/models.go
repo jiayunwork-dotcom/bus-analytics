@@ -137,3 +137,26 @@ type UploadResponse struct {
 	InsertedCount int               `json:"inserted_count"`
 	Errors        []ValidationError `json:"errors"`
 }
+
+type LineHealthSubScore struct {
+	Name       string  `json:"name"`
+	RawValue   float64 `json:"raw_value"`
+	RawValueStr string `json:"raw_value_str"`
+	Score      float64 `json:"score"`
+	MaxScore   float64 `json:"max_score"`
+	ScoreRatio float64 `json:"score_ratio"`
+}
+
+type LineHealthScore struct {
+	LineNo           string             `json:"line_no"`
+	LineName         string             `json:"line_name"`
+	TotalScore       float64            `json:"total_score"`
+	ScoreLevel       string             `json:"score_level"`
+	PassengerIntensityScore LineHealthSubScore `json:"passenger_intensity"`
+	PeakLoadFactorScore     LineHealthSubScore `json:"peak_load_factor"`
+	OnTimeRateScore         LineHealthSubScore `json:"on_time_rate"`
+	OperatingSpeedScore     LineHealthSubScore `json:"operating_speed"`
+	VehicleUtilizationScore LineHealthSubScore `json:"vehicle_utilization"`
+	AvgDailyTripsPerVehicle float64 `json:"avg_daily_trips_per_vehicle"`
+}
+
