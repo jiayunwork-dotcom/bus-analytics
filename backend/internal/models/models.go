@@ -160,3 +160,54 @@ type LineHealthScore struct {
 	AvgDailyTripsPerVehicle float64 `json:"avg_daily_trips_per_vehicle"`
 }
 
+type SimParams struct {
+	LineNo           string `json:"line_no" binding:"required"`
+	PeakInterval     int    `json:"peak_interval"`
+	OffPeakInterval  int    `json:"off_peak_interval"`
+	StationDelta     int    `json:"station_delta"`
+	Date             string `json:"date"`
+}
+
+type SimKPI struct {
+	DailyTrips        int     `json:"daily_trips"`
+	PeakLoadFactor    float64 `json:"peak_load_factor"`
+	OperatingSpeed    float64 `json:"operating_speed"`
+	PassengerIntensity float64 `json:"passenger_intensity"`
+}
+
+type AdjLineImpact struct {
+	LineNo           string  `json:"line_no"`
+	LineName         string  `json:"line_name"`
+	OrigPeakLoad     float64 `json:"orig_peak_load"`
+	NewPeakLoad      float64 `json:"new_peak_load"`
+	LoadIncrement    float64 `json:"load_increment"`
+	OverloadRisk     bool    `json:"overload_risk"`
+	SharedStations   []string `json:"shared_stations"`
+}
+
+type TrendPoint struct {
+	RemoveCount   int     `json:"remove_count"`
+	PeakLoadFactor float64 `json:"peak_load_factor"`
+}
+
+type SimResult struct {
+	LineNo              string          `json:"line_no"`
+	LineName            string          `json:"line_name"`
+	OrigStationCount    int             `json:"orig_station_count"`
+	NewStationCount     int             `json:"new_station_count"`
+	OrigPeakInterval    int             `json:"orig_peak_interval"`
+	NewPeakInterval     int             `json:"new_peak_interval"`
+	OrigOffPeakInterval int             `json:"orig_off_peak_interval"`
+	NewOffPeakInterval  int             `json:"new_off_peak_interval"`
+	OrigTotalTrips      int             `json:"orig_total_trips"`
+	NewTotalTrips       int             `json:"new_total_trips"`
+	TripsDelta          int             `json:"trips_delta"`
+	PeakCapacityChange  float64         `json:"peak_capacity_change"`
+	CapacityWarning     bool            `json:"capacity_warning"`
+	AvailableVehicles   int             `json:"available_vehicles"`
+	OrigKPI             SimKPI          `json:"orig_kpi"`
+	NewKPI              SimKPI          `json:"new_kpi"`
+	AdjacentImpacts     []AdjLineImpact `json:"adjacent_impacts"`
+	RemovalTrend        []TrendPoint    `json:"removal_trend"`
+}
+

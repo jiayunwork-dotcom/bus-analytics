@@ -12,6 +12,7 @@ const routes = [
   { path: '/network', name: 'Network', component: () => import('../views/Network.vue') },
   { path: '/compare', name: 'Compare', component: () => import('../views/Compare.vue') },
   { path: '/compare/health', name: 'LineHealth', component: () => import('../views/LineHealth.vue') },
+  { path: '/simulation', name: 'Simulation', component: () => import('../views/Simulation.vue') },
 ]
 
 const router = createRouter({

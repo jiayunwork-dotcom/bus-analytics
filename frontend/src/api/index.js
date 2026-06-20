@@ -45,5 +45,7 @@ export default {
 
   exportReport: (lineNos) => api.post('/report/export', { line_nos: lineNos }, {
     responseType: 'blob'
-  })
+  }),
+
+  runLineSimulation: (params) => api.post('/simulation/line', params)
 }

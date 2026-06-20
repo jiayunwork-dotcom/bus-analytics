@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bus-analytics/internal/db"
+	"bus-analytics/internal/models"
 	"bus-analytics/internal/services"
 	"database/sql"
 	"net/http"
@@ -24,6 +25,7 @@ type Handler struct {
 	networkSvc    *services.NetworkService
 	comparisonSvc *services.ComparisonService
 	reportSvc     *services.ReportService
+	simulationSvc *services.SimulationService
 }
 
 func NewHandler() *Handler {
@@ -36,6 +38,7 @@ func NewHandler() *Handler {
 		networkSvc:    services.NewNetworkService(),
 		comparisonSvc: services.NewComparisonService(),
 		reportSvc:     services.NewReportService(),
+		simulationSvc: services.NewSimulationService(),
 	}
 }
 
@@ -308,4 +311,22 @@ func (h *Handler) GetLineHealthScores(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, scores)
+}
+
+func (h *Handler) RunLineSimulation(c *gin.Context) {
+	var params models.SimParams
+	if err := c.ShouldBindJSON(&params); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误: " + err.Error()})
+		return
+	}
+	if params.LineNo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请选择线路"})
+		return
+	}
+	result, err := h.simulationSvc.RunSimulation(&params)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }

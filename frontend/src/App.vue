@@ -48,6 +48,10 @@
           <el-icon><Medal /></el-icon>
           <span>线路健康度评分</span>
         </el-menu-item>
+        <el-menu-item index="/simulation">
+          <el-icon><MagicStick /></el-icon>
+          <span>线路调整模拟</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

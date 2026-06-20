@@ -57,6 +57,8 @@ func main() {
 		api.GET("/compare/health-scores", h.GetLineHealthScores)
 
 		api.POST("/report/export", h.ExportReport)
+
+		api.POST("/simulation/line", h.RunLineSimulation)
 	}
 
 	r.GET("/health", func(c *gin.Context) {
