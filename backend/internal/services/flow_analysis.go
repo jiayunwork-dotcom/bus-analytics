@@ -79,7 +79,14 @@ func (s *FlowAnalysisService) calcDirectionSectionFlow(lineNo, date string, dire
 			if err := stationRows.Scan(&seq, &name, &board, &alight); err != nil {
 				continue
 			}
-			onBoard = onBoard - alight + board
+			effectiveAlight := alight
+			if effectiveAlight > onBoard {
+				effectiveAlight = onBoard
+			}
+			onBoard = onBoard - effectiveAlight + board
+			if onBoard < 0 {
+				onBoard = 0
+			}
 
 			if prevSeq > 0 {
 				if accum[prevSeq] == nil {
@@ -124,10 +131,19 @@ func (s *FlowAnalysisService) calcDirectionSectionFlow(lineNo, date string, dire
 
 func (s *FlowAnalysisService) GetHourlyDistribution(lineNo, date string) ([]models.HourlyDistribution, error) {
 	rows, err := db.DB.Query(`
-		SELECT EXTRACT(HOUR FROM t.actual_departure_time) as hour,
-			SUM(s.board_count)
+		WITH trip_departure AS (
+			SELECT line_no, trip_no, trip_date, MIN(actual_departure_time) as dep_time
+			FROM trips
+			WHERE line_no = $1 AND trip_date = $2::date
+			GROUP BY line_no, trip_no, trip_date
+		)
+		SELECT EXTRACT(HOUR FROM td.dep_time) as hour,
+			COALESCE(SUM(s.board_count), 0)
 		FROM station_flows s
-		INNER JOIN trips t ON s.line_no = t.line_no AND s.trip_no = t.trip_no AND s.flow_date = t.trip_date
+		INNER JOIN trip_departure td 
+			ON s.line_no = td.line_no 
+			AND s.trip_no = td.trip_no 
+			AND s.flow_date = td.trip_date
 		WHERE s.line_no = $1 AND s.flow_date = $2::date
 		GROUP BY hour
 		ORDER BY hour
@@ -180,9 +196,17 @@ func (s *FlowAnalysisService) CheckTidalPattern(lineNo, date string) (bool, floa
 func (s *FlowAnalysisService) getDirectionHourlyBoard(lineNo, date string, direction, startHour, endHour int) int {
 	var total sql.NullInt64
 	db.DB.QueryRow(`
+		WITH trip_departure AS (
+			SELECT line_no, trip_no, trip_date, direction, actual_departure_time
+			FROM trips
+			WHERE line_no = $1 AND trip_date = $2::date AND direction = $3
+		)
 		SELECT SUM(s.board_count)
 		FROM station_flows s
-		INNER JOIN trips t ON s.line_no = t.line_no AND s.trip_no = t.trip_no AND s.flow_date = t.trip_date
+		INNER JOIN trip_departure t 
+			ON s.line_no = t.line_no 
+			AND s.trip_no = t.trip_no 
+			AND s.flow_date = t.trip_date
 		WHERE s.line_no = $1 AND s.flow_date = $2::date AND t.direction = $3
 			AND EXTRACT(HOUR FROM t.actual_departure_time) >= $4
 			AND EXTRACT(HOUR FROM t.actual_departure_time) < $5
@@ -194,27 +218,72 @@ func (s *FlowAnalysisService) getDirectionHourlyBoard(lineNo, date string, direc
 }
 
 func (s *FlowAnalysisService) calcOppositeEmptyRate(lineNo, date string) float64 {
-	var totalTrips, lowLoadTrips sql.NullInt64
-	db.DB.QueryRow(`
-		WITH trip_loads AS (
-			SELECT t.trip_no, t.direction,
-				(SELECT MAX(running_count) FROM (
-					SELECT 
-						SUM(board_count - alight_count) OVER (ORDER BY s.station_seq) as running_count
-					FROM station_flows s
-					WHERE s.line_no = t.line_no AND s.trip_no = t.trip_no AND s.flow_date = t.trip_date
-				) sub) as max_load
-			FROM trips t
-			WHERE t.line_no = $1 AND t.trip_date = $2::date
-		)
-		SELECT COUNT(*), COUNT(*) FILTER (WHERE max_load < 16)
-		FROM trip_loads
-	`, lineNo, date).Scan(&totalTrips, &lowLoadTrips)
-
-	if !totalTrips.Valid || totalTrips.Int64 == 0 {
+	rows, err := db.DB.Query(`
+		SELECT DISTINCT ON (trip_no) trip_no
+		FROM trips
+		WHERE line_no = $1 AND trip_date = $2::date
+		ORDER BY trip_no, actual_departure_time
+	`, lineNo, date)
+	if err != nil {
 		return 0
 	}
-	return float64(lowLoadTrips.Int64) / float64(totalTrips.Int64) * 100
+	defer rows.Close()
+
+	var tripNos []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err == nil {
+			tripNos = append(tripNos, t)
+		}
+	}
+
+	totalTrips := len(tripNos)
+	if totalTrips == 0 {
+		return 0
+	}
+
+	lowLoadTrips := 0
+	for _, tripNo := range tripNos {
+		maxLoad := s.getMaxOnBoardSimple(lineNo, tripNo, date)
+		if maxLoad < 16 {
+			lowLoadTrips++
+		}
+	}
+
+	return float64(lowLoadTrips) / float64(totalTrips) * 100
+}
+
+func (s *FlowAnalysisService) getMaxOnBoardSimple(lineNo, tripNo, flowDate string) int {
+	rows, err := db.DB.Query(`
+		SELECT station_seq, board_count, alight_count
+		FROM station_flows
+		WHERE line_no = $1 AND trip_no = $2 AND flow_date = $3::date
+		ORDER BY station_seq
+	`, lineNo, tripNo, flowDate)
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+
+	onBoard := 0
+	maxOnBoard := 0
+	for rows.Next() {
+		var seq, board, alight int
+		if err := rows.Scan(&seq, &board, &alight); err == nil {
+			effectiveAlight := alight
+			if effectiveAlight > onBoard {
+				effectiveAlight = onBoard
+			}
+			onBoard = onBoard - effectiveAlight + board
+			if onBoard < 0 {
+				onBoard = 0
+			}
+			if onBoard > maxOnBoard {
+				maxOnBoard = onBoard
+			}
+		}
+	}
+	return maxOnBoard
 }
 
 func (s *FlowAnalysisService) InferOD(lineNo, date string) (float64, []models.ODPair, error) {

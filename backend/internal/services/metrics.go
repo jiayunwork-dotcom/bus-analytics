@@ -11,6 +11,22 @@ import (
 
 const RatedCapacity = 80
 
+func parseHour(timeStr string) int {
+	hour := 0
+	for i := 0; i < len(timeStr) && i < 2; i++ {
+		c := timeStr[i]
+		if c >= '0' && c <= '9' {
+			hour = hour*10 + int(c-'0')
+		} else {
+			break
+		}
+	}
+	if hour < 0 || hour > 23 {
+		return 0
+	}
+	return hour
+}
+
 type MetricsService struct{}
 
 func NewMetricsService() *MetricsService {
@@ -153,10 +169,11 @@ func (s *MetricsService) calcLoadFactors(lineNo string) (float64, float64) {
 	offPeakCount := 0
 
 	rows, err := db.DB.Query(`
-		SELECT t.actual_departure_time::text, t.trip_no, t.trip_date::text
+		SELECT DISTINCT ON (t.trip_no, t.trip_date)
+			t.actual_departure_time::text, t.trip_no, t.trip_date::text
 		FROM trips t
 		WHERE t.line_no = $1
-		ORDER BY t.trip_date, t.actual_departure_time
+		ORDER BY t.trip_date, t.trip_no, t.actual_departure_time
 	`, lineNo)
 	if err != nil {
 		return 0, 0
@@ -170,13 +187,12 @@ func (s *MetricsService) calcLoadFactors(lineNo string) (float64, float64) {
 		}
 
 		maxPax := s.getMaxOnBoard(lineNo, tripNo, tripDate, 0)
-		if maxPax == 0 {
-			continue
-		}
 		load := float64(maxPax) / RatedCapacity
+		if load > 1.0 {
+			load = 1.0
+		}
 
-		hour := 0
-		fmt.Sscanf(depTime, "%d:", &hour)
+		hour := parseHour(depTime)
 		if (hour >= 7 && hour < 9) || (hour >= 17 && hour < 19) {
 			peakSum += load
 			peakCount++
@@ -214,7 +230,14 @@ func (s *MetricsService) getMaxOnBoard(lineNo, tripNo, flowDate string, directio
 	for rows.Next() {
 		var seq, board, alight int
 		if err := rows.Scan(&seq, &board, &alight); err == nil {
-			onBoard = onBoard - alight + board
+			effectiveAlight := alight
+			if effectiveAlight > onBoard {
+				effectiveAlight = onBoard
+			}
+			onBoard = onBoard - effectiveAlight + board
+			if onBoard < 0 {
+				onBoard = 0
+			}
 			if onBoard > maxOnBoard {
 				maxOnBoard = onBoard
 			}
@@ -376,10 +399,11 @@ func (s *MetricsService) GetLineDailyTrend(lineNo string, startDate, endDate str
 
 func (s *MetricsService) calcDailyLoadFactor(lineNo, date string) (float64, float64) {
 	rows, err := db.DB.Query(`
-		SELECT t.actual_departure_time::text, t.trip_no
+		SELECT DISTINCT ON (t.trip_no)
+			t.actual_departure_time::text, t.trip_no
 		FROM trips t
 		WHERE t.line_no = $1 AND t.trip_date = $2::date
-		ORDER BY t.actual_departure_time
+		ORDER BY t.trip_no, t.actual_departure_time
 	`, lineNo, date)
 	if err != nil {
 		return 0, 0
@@ -394,12 +418,11 @@ func (s *MetricsService) calcDailyLoadFactor(lineNo, date string) (float64, floa
 			continue
 		}
 		maxPax := s.getMaxOnBoard(lineNo, tripNo, date, 0)
-		if maxPax == 0 {
-			continue
-		}
 		load := float64(maxPax) / RatedCapacity
-		hour := 0
-		fmt.Sscanf(depTime, "%d:", &hour)
+		if load > 1.0 {
+			load = 1.0
+		}
+		hour := parseHour(depTime)
 		if (hour >= 7 && hour < 9) || (hour >= 17 && hour < 19) {
 			peakSum += load
 			peakCnt++

@@ -202,12 +202,19 @@ func (s *ScheduleOptimizationService) enforcePeakConstraint(pds []*periodInfo) {
 func (s *ScheduleOptimizationService) getPeriodData(lineNo, date string, startHour, endHour int) (int, int) {
 	var passengers sql.NullInt64
 	db.DB.QueryRow(`
-		SELECT SUM(s.board_count)
+		WITH trip_departure AS (
+			SELECT line_no, trip_no, trip_date, actual_departure_time
+			FROM trips
+			WHERE line_no = $1 AND trip_date = $2::date
+				AND EXTRACT(HOUR FROM actual_departure_time) >= $3
+				AND EXTRACT(HOUR FROM actual_departure_time) < $4
+			GROUP BY line_no, trip_no, trip_date, actual_departure_time
+		)
+		SELECT COALESCE(SUM(s.board_count), 0)
 		FROM station_flows s
-		INNER JOIN trips t ON s.line_no = t.line_no AND s.trip_no = t.trip_no AND s.flow_date = t.trip_date
+		INNER JOIN trip_departure td 
+			ON s.line_no = td.line_no AND s.trip_no = td.trip_no AND s.flow_date = td.trip_date
 		WHERE s.line_no = $1 AND s.flow_date = $2::date
-			AND EXTRACT(HOUR FROM t.actual_departure_time) >= $3
-			AND EXTRACT(HOUR FROM t.actual_departure_time) < $4
 	`, lineNo, date, startHour, endHour).Scan(&passengers)
 
 	var trips sql.NullInt64
