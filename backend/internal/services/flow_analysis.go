@@ -34,7 +34,7 @@ func (s *FlowAnalysisService) calcDirectionSectionFlow(lineNo, date string, dire
 	rows, err := db.DB.Query(`
 		SELECT trip_no
 		FROM trips
-		WHERE line_no = $1 AND trip_date = $2 AND direction = $3
+		WHERE line_no = $1 AND trip_date = $2::date AND direction = $3
 	`, lineNo, date, direction)
 	if err != nil {
 		return []models.SectionFlow{}, 0
@@ -49,15 +49,20 @@ func (s *FlowAnalysisService) calcDirectionSectionFlow(lineNo, date string, dire
 		}
 	}
 
-	sectionAccum := make(map[int]map[string]interface{})
-	stationNames := make(map[int]string)
+	type sectionAcc struct {
+		fromStation string
+		toStation   string
+		sumPax      int
+		tripCount   int
+	}
+	accum := make(map[int]*sectionAcc)
 	maxPassengers := 0
 
 	for _, tripNo := range tripNos {
 		stationRows, err := db.DB.Query(`
 			SELECT station_seq, station_name, board_count, alight_count
 			FROM station_flows
-			WHERE line_no = $1 AND trip_no = $2 AND flow_date = $3
+			WHERE line_no = $1 AND trip_no = $2 AND flow_date = $3::date
 			ORDER BY station_seq
 		`, lineNo, tripNo, date)
 		if err != nil {
@@ -74,22 +79,17 @@ func (s *FlowAnalysisService) calcDirectionSectionFlow(lineNo, date string, dire
 			if err := stationRows.Scan(&seq, &name, &board, &alight); err != nil {
 				continue
 			}
-			stationNames[seq] = name
 			onBoard = onBoard - alight + board
 
 			if prevSeq > 0 {
-				key := prevSeq
-				if sectionAccum[key] == nil {
-					sectionAccum[key] = map[string]interface{}{
-						"from": prevName,
-						"to":   name,
-						"sum":  0,
-						"cnt":  0,
+				if accum[prevSeq] == nil {
+					accum[prevSeq] = &sectionAcc{
+						fromStation: prevName,
+						toStation:   name,
 					}
 				}
-				m := sectionAccum[key]
-				m["sum"] = m["sum"].(int) + onBoard
-				m["cnt"] = m["cnt"].(int) + 1
+				accum[prevSeq].sumPax += onBoard
+				accum[prevSeq].tripCount++
 			}
 			prevSeq = seq
 			prevName = name
@@ -98,20 +98,18 @@ func (s *FlowAnalysisService) calcDirectionSectionFlow(lineNo, date string, dire
 	}
 
 	var sections []models.SectionFlow
-	for seq, m := range sectionAccum {
-		sum := m["sum"].(int)
-		cnt := m["cnt"].(int)
+	for seq, acc := range accum {
 		avg := 0
-		if cnt > 0 {
-			avg = sum / cnt
+		if acc.tripCount > 0 {
+			avg = acc.sumPax / acc.tripCount
 		}
 		if avg > maxPassengers {
 			maxPassengers = avg
 		}
 		sections = append(sections, models.SectionFlow{
 			StationSeq:  seq,
-			FromStation: m["from"].(string),
-			ToStation:   m["to"].(string),
+			FromStation: acc.fromStation,
+			ToStation:   acc.toStation,
 			Passengers:  avg,
 			Direction:   direction,
 		})
@@ -130,7 +128,7 @@ func (s *FlowAnalysisService) GetHourlyDistribution(lineNo, date string) ([]mode
 			SUM(s.board_count)
 		FROM station_flows s
 		INNER JOIN trips t ON s.line_no = t.line_no AND s.trip_no = t.trip_no AND s.flow_date = t.trip_date
-		WHERE s.line_no = $1 AND s.flow_date = $2
+		WHERE s.line_no = $1 AND s.flow_date = $2::date
 		GROUP BY hour
 		ORDER BY hour
 	`, lineNo, date)
@@ -185,7 +183,7 @@ func (s *FlowAnalysisService) getDirectionHourlyBoard(lineNo, date string, direc
 		SELECT SUM(s.board_count)
 		FROM station_flows s
 		INNER JOIN trips t ON s.line_no = t.line_no AND s.trip_no = t.trip_no AND s.flow_date = t.trip_date
-		WHERE s.line_no = $1 AND s.flow_date = $2 AND t.direction = $3
+		WHERE s.line_no = $1 AND s.flow_date = $2::date AND t.direction = $3
 			AND EXTRACT(HOUR FROM t.actual_departure_time) >= $4
 			AND EXTRACT(HOUR FROM t.actual_departure_time) < $5
 	`, lineNo, date, direction, startHour, endHour).Scan(&total)
@@ -207,7 +205,7 @@ func (s *FlowAnalysisService) calcOppositeEmptyRate(lineNo, date string) float64
 					WHERE s.line_no = t.line_no AND s.trip_no = t.trip_no AND s.flow_date = t.trip_date
 				) sub) as max_load
 			FROM trips t
-			WHERE t.line_no = $1 AND t.trip_date = $2
+			WHERE t.line_no = $1 AND t.trip_date = $2::date
 		)
 		SELECT COUNT(*), COUNT(*) FILTER (WHERE max_load < 16)
 		FROM trip_loads
@@ -223,7 +221,7 @@ func (s *FlowAnalysisService) InferOD(lineNo, date string) (float64, []models.OD
 	rows, err := db.DB.Query(`
 		SELECT card_id, station_seq, station_name, flow_date::text
 		FROM station_flows
-		WHERE line_no = $1 AND flow_date = $2 AND card_id IS NOT NULL AND card_id != ''
+		WHERE line_no = $1 AND flow_date = $2::date AND card_id IS NOT NULL AND card_id != ''
 		ORDER BY card_id, station_seq
 	`, lineNo, date)
 	if err != nil {

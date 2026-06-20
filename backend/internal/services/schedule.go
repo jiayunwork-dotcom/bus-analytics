@@ -69,6 +69,7 @@ func (s *ScheduleOptimizationService) OptimizeSchedule(lineNo string, totalVehic
 
 	totalCurrentWait := 0.0
 	totalOptimizedWait := 0.0
+	totalHours := 0.0
 
 	for _, pd := range periodData {
 		recInterval := MinInterval
@@ -94,11 +95,12 @@ func (s *ScheduleOptimizationService) OptimizeSchedule(lineNo string, totalVehic
 		result.TotalTrips += pd.RecommendedTrips
 		totalCurrentWait += float64(pd.CurrentInterval) / 2 * pd.Hours
 		totalOptimizedWait += float64(recInterval) / 2 * pd.Hours
+		totalHours += pd.Hours
 	}
 
-	if totalCurrentWait > 0 {
-		result.CurrentAvgWaitTime = math.Round(totalCurrentWait/6*100) / 100
-		result.OptimizedAvgWaitTime = math.Round(totalOptimizedWait/6*100) / 100
+	if totalCurrentWait > 0 && totalHours > 0 {
+		result.CurrentAvgWaitTime = math.Round(totalCurrentWait/totalHours*100) / 100
+		result.OptimizedAvgWaitTime = math.Round(totalOptimizedWait/totalHours*100) / 100
 		result.ImprovementPercent = math.Round((totalCurrentWait-totalOptimizedWait)/totalCurrentWait*10000) / 100
 	}
 
@@ -120,28 +122,23 @@ func (s *ScheduleOptimizationService) allocateTrips(pds []*periodInfo, totalVehi
 	for _, pd := range pds {
 		pd.DemandWeight = float64(pd.Passengers+1) / pd.Hours
 		if pd.Period.IsPeak {
-			pd.DemandWeight *= 2
+			pd.DemandWeight *= 1.5
 		}
 		totalWeight += pd.DemandWeight
 	}
 
-	remainingTrips := totalVehicles * 6
-	if remainingTrips <= 0 {
-		remainingTrips = 30
+	totalOperationHours := 0.0
+	for _, pd := range pds {
+		totalOperationHours += pd.Hours
 	}
 
-	peakMinRatio := 0.4
-	peakTrips := int(math.Ceil(float64(remainingTrips) * peakMinRatio))
-	offPeakTrips := remainingTrips - peakTrips
-
-	peakWeight := 0.0
-	offPeakWeight := 0.0
-	for _, pd := range pds {
-		if pd.Period.IsPeak {
-			peakWeight += pd.DemandWeight
-		} else {
-			offPeakWeight += pd.DemandWeight
-		}
+	maxTotalTrips := int(totalOperationHours * 60 / MinInterval)
+	totalTripsBudget := totalVehicles * int(totalOperationHours)
+	if totalTripsBudget <= 0 {
+		totalTripsBudget = int(totalOperationHours * 60 / 10)
+	}
+	if totalTripsBudget > maxTotalTrips {
+		totalTripsBudget = maxTotalTrips
 	}
 
 	for _, pd := range pds {
@@ -151,20 +148,13 @@ func (s *ScheduleOptimizationService) allocateTrips(pds []*periodInfo, totalVehi
 			minTrips = 1
 		}
 
-		weight := pd.DemandWeight
-		available := offPeakTrips
-		if pd.Period.IsPeak {
-			available = peakTrips
-			if peakWeight > 0 {
-				weight = pd.DemandWeight / peakWeight
-			}
+		var allocated int
+		if totalWeight > 0 {
+			allocated = int(math.Round(float64(totalTripsBudget) * pd.DemandWeight / totalWeight))
 		} else {
-			if offPeakWeight > 0 {
-				weight = pd.DemandWeight / offPeakWeight
-			}
+			allocated = minTrips
 		}
 
-		allocated := int(math.Round(float64(available) * weight))
 		if allocated < minTrips {
 			allocated = minTrips
 		}
@@ -175,37 +165,35 @@ func (s *ScheduleOptimizationService) allocateTrips(pds []*periodInfo, totalVehi
 		pd.RecommendedTrips = allocated
 	}
 
-	s.balancePeakOffPeak(pds)
+	s.enforcePeakConstraint(pds)
 }
 
-func (s *ScheduleOptimizationService) balancePeakOffPeak(pds []*periodInfo) {
-	peakIntervals := make([]int, 0)
-	offPeakIntervals := make([]int, 0)
-
-	for _, pd := range pds {
-		interval := MinInterval
-		if pd.RecommendedTrips > 0 && pd.Hours > 0 {
-			interval = int(pd.Hours * 60 / float64(pd.RecommendedTrips))
-		}
-		if pd.Period.IsPeak {
-			peakIntervals = append(peakIntervals, interval)
-		} else {
-			offPeakIntervals = append(offPeakIntervals, interval)
-		}
-	}
-
+func (s *ScheduleOptimizationService) enforcePeakConstraint(pds []*periodInfo) {
 	for _, pd := range pds {
 		if !pd.Period.IsPeak {
 			continue
 		}
-		peakInterval := MinInterval
-		if pd.RecommendedTrips > 0 && pd.Hours > 0 {
-			peakInterval = int(pd.Hours * 60 / float64(pd.RecommendedTrips))
+		if pd.RecommendedTrips == 0 || pd.Hours == 0 {
+			continue
 		}
-		for _, oi := range offPeakIntervals {
-			for peakInterval > oi && pd.RecommendedTrips > 1 {
-				pd.RecommendedTrips--
-				peakInterval = int(pd.Hours * 60 / float64(pd.RecommendedTrips))
+		peakInterval := pd.Hours * 60 / float64(pd.RecommendedTrips)
+
+		for _, opd := range pds {
+			if opd.Period.IsPeak || opd.RecommendedTrips == 0 || opd.Hours == 0 {
+				continue
+			}
+			offPeakInterval := opd.Hours * 60 / float64(opd.RecommendedTrips)
+
+			if peakInterval > offPeakInterval {
+				minOffPeakInterval := offPeakInterval
+				maxTrips := int(pd.Hours * 60 / MinInterval)
+				for pd.RecommendedTrips < maxTrips {
+					pd.RecommendedTrips++
+					peakInterval = pd.Hours * 60 / float64(pd.RecommendedTrips)
+					if peakInterval <= minOffPeakInterval {
+						break
+					}
+				}
 			}
 		}
 	}
@@ -217,7 +205,7 @@ func (s *ScheduleOptimizationService) getPeriodData(lineNo, date string, startHo
 		SELECT SUM(s.board_count)
 		FROM station_flows s
 		INNER JOIN trips t ON s.line_no = t.line_no AND s.trip_no = t.trip_no AND s.flow_date = t.trip_date
-		WHERE s.line_no = $1 AND s.flow_date = $2
+		WHERE s.line_no = $1 AND s.flow_date = $2::date
 			AND EXTRACT(HOUR FROM t.actual_departure_time) >= $3
 			AND EXTRACT(HOUR FROM t.actual_departure_time) < $4
 	`, lineNo, date, startHour, endHour).Scan(&passengers)
@@ -226,7 +214,7 @@ func (s *ScheduleOptimizationService) getPeriodData(lineNo, date string, startHo
 	db.DB.QueryRow(`
 		SELECT COUNT(DISTINCT trip_no)
 		FROM trips
-		WHERE line_no = $1 AND trip_date = $2
+		WHERE line_no = $1 AND trip_date = $2::date
 			AND EXTRACT(HOUR FROM actual_departure_time) >= $3
 			AND EXTRACT(HOUR FROM actual_departure_time) < $4
 	`, lineNo, date, startHour, endHour).Scan(&trips)

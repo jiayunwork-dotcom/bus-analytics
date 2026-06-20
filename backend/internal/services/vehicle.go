@@ -34,7 +34,7 @@ func (s *VehicleService) GetVehicleUtilizations(date string) ([]models.VehicleUt
 			COALESCE(vm.operating_km, 0)
 		FROM trips t
 		LEFT JOIN vehicle_mileages vm ON t.vehicle_no = vm.vehicle_no AND t.trip_date = vm.mileage_date
-		WHERE t.trip_date = $1
+		WHERE t.trip_date = $1::date
 		GROUP BY t.vehicle_no, vm.operating_km
 		ORDER BY daily_trips DESC
 	`
@@ -99,7 +99,7 @@ func (s *VehicleService) GetVehicleGantt(vehicleNo, date string) ([]VehicleGantt
 			LEAD(actual_departure_time) OVER (PARTITION BY vehicle_no ORDER BY actual_departure_time)::text as end_time,
 			trip_date::text
 		FROM trips
-		WHERE vehicle_no = $1 AND trip_date = $2
+		WHERE vehicle_no = $1 AND trip_date = $2::date
 		ORDER BY actual_departure_time
 	`, vehicleNo, date)
 	if err != nil {

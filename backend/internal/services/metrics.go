@@ -147,17 +147,16 @@ func (s *MetricsService) getDailyPassengers(lineNo string) map[string]int {
 }
 
 func (s *MetricsService) calcLoadFactors(lineNo string) (float64, float64) {
-	peakPassengers := 0.0
+	peakSum := 0.0
 	peakCount := 0
-	offPeakPassengers := 0.0
+	offPeakSum := 0.0
 	offPeakCount := 0
 
 	rows, err := db.DB.Query(`
-		SELECT t.actual_departure_time, s.trip_no, s.flow_date, s.direction
-		FROM station_flows s
-		INNER JOIN trips t ON s.line_no = t.line_no AND s.trip_no = t.trip_no AND s.flow_date = t.trip_date
-		WHERE s.line_no = $1
-		GROUP BY t.actual_departure_time, s.trip_no, s.flow_date, s.direction
+		SELECT t.actual_departure_time::text, t.trip_no, t.trip_date::text
+		FROM trips t
+		WHERE t.line_no = $1
+		ORDER BY t.trip_date, t.actual_departure_time
 	`, lineNo)
 	if err != nil {
 		return 0, 0
@@ -165,33 +164,35 @@ func (s *MetricsService) calcLoadFactors(lineNo string) (float64, float64) {
 	defer rows.Close()
 
 	for rows.Next() {
-		var depTime, tripNo, flowDate string
-		var direction int
-		if err := rows.Scan(&depTime, &tripNo, &flowDate, &direction); err != nil {
+		var depTime, tripNo, tripDate string
+		if err := rows.Scan(&depTime, &tripNo, &tripDate); err != nil {
 			continue
 		}
 
-		maxPax := s.getMaxOnBoard(lineNo, tripNo, flowDate, direction)
+		maxPax := s.getMaxOnBoard(lineNo, tripNo, tripDate, 0)
+		if maxPax == 0 {
+			continue
+		}
 		load := float64(maxPax) / RatedCapacity
 
 		hour := 0
 		fmt.Sscanf(depTime, "%d:", &hour)
 		if (hour >= 7 && hour < 9) || (hour >= 17 && hour < 19) {
-			peakPassengers += load
+			peakSum += load
 			peakCount++
 		} else {
-			offPeakPassengers += load
+			offPeakSum += load
 			offPeakCount++
 		}
 	}
 
 	peakLoad := 0.0
 	if peakCount > 0 {
-		peakLoad = peakPassengers / float64(peakCount)
+		peakLoad = peakSum / float64(peakCount)
 	}
 	offPeakLoad := 0.0
 	if offPeakCount > 0 {
-		offPeakLoad = offPeakPassengers / float64(offPeakCount)
+		offPeakLoad = offPeakSum / float64(offPeakCount)
 	}
 	return peakLoad, offPeakLoad
 }
@@ -200,7 +201,7 @@ func (s *MetricsService) getMaxOnBoard(lineNo, tripNo, flowDate string, directio
 	rows, err := db.DB.Query(`
 		SELECT station_seq, board_count, alight_count
 		FROM station_flows
-		WHERE line_no = $1 AND trip_no = $2 AND flow_date = $3
+		WHERE line_no = $1 AND trip_no = $2 AND flow_date = $3::date
 		ORDER BY station_seq
 	`, lineNo, tripNo, flowDate)
 	if err != nil {
@@ -355,7 +356,7 @@ func (s *MetricsService) GetLineDailyTrend(lineNo string, startDate, endDate str
 		}
 
 		var dailyPassengers sql.NullInt64
-		db.DB.QueryRow(`SELECT SUM(board_count) FROM station_flows WHERE line_no = $1 AND flow_date = $2`, lineNo, d).Scan(&dailyPassengers)
+		db.DB.QueryRow(`SELECT SUM(board_count) FROM station_flows WHERE line_no = $1 AND flow_date = $2::date`, lineNo, d).Scan(&dailyPassengers)
 		if totalKm > 0 && dailyPassengers.Valid {
 			eff.PassengerIntensity = float64(dailyPassengers.Int64) / totalKm
 		}
@@ -375,11 +376,10 @@ func (s *MetricsService) GetLineDailyTrend(lineNo string, startDate, endDate str
 
 func (s *MetricsService) calcDailyLoadFactor(lineNo, date string) (float64, float64) {
 	rows, err := db.DB.Query(`
-		SELECT t.actual_departure_time, s.trip_no, s.direction
-		FROM station_flows s
-		INNER JOIN trips t ON s.line_no = t.line_no AND s.trip_no = t.trip_no AND s.flow_date = t.trip_date
-		WHERE s.line_no = $1 AND s.flow_date = $2
-		GROUP BY t.actual_departure_time, s.trip_no, s.direction
+		SELECT t.actual_departure_time::text, t.trip_no
+		FROM trips t
+		WHERE t.line_no = $1 AND t.trip_date = $2::date
+		ORDER BY t.actual_departure_time
 	`, lineNo, date)
 	if err != nil {
 		return 0, 0
@@ -390,11 +390,13 @@ func (s *MetricsService) calcDailyLoadFactor(lineNo, date string) (float64, floa
 	peakCnt, offPeakCnt := 0, 0
 	for rows.Next() {
 		var depTime, tripNo string
-		var direction int
-		if err := rows.Scan(&depTime, &tripNo, &direction); err != nil {
+		if err := rows.Scan(&depTime, &tripNo); err != nil {
 			continue
 		}
-		maxPax := s.getMaxOnBoard(lineNo, tripNo, date, direction)
+		maxPax := s.getMaxOnBoard(lineNo, tripNo, date, 0)
+		if maxPax == 0 {
+			continue
+		}
 		load := float64(maxPax) / RatedCapacity
 		hour := 0
 		fmt.Sscanf(depTime, "%d:", &hour)
@@ -423,13 +425,13 @@ func (s *MetricsService) calcDailyOperatingSpeed(lineNo, date string) float64 {
 		SELECT SUM(vm.operating_km)
 		FROM vehicle_mileages vm
 		INNER JOIN trips t ON vm.vehicle_no = t.vehicle_no AND vm.mileage_date = t.trip_date
-		WHERE t.line_no = $1 AND t.trip_date = $2
+		WHERE t.line_no = $1 AND t.trip_date = $2::date
 	`, lineNo, date).Scan(&totalKm)
 
 	var firstTime, lastTime sql.NullString
 	db.DB.QueryRow(`
 		SELECT MIN(actual_departure_time)::text, MAX(actual_departure_time)::text
-		FROM trips WHERE line_no = $1 AND trip_date = $2
+		FROM trips WHERE line_no = $1 AND trip_date = $2::date
 	`, lineNo, date).Scan(&firstTime, &lastTime)
 
 	if !totalKm.Valid || !firstTime.Valid || !lastTime.Valid {
@@ -452,7 +454,7 @@ func (s *MetricsService) calcDailyOnTimeRate(lineNo, date string) float64 {
 	db.DB.QueryRow(`
 		SELECT COUNT(*),
 			COUNT(*) FILTER (WHERE ABS(EXTRACT(EPOCH FROM (actual_departure_time - planned_departure_time))) <= 180)
-		FROM trips WHERE line_no = $1 AND trip_date = $2
+		FROM trips WHERE line_no = $1 AND trip_date = $2::date
 	`, lineNo, date).Scan(&total, &onTime)
 	if !total.Valid || total.Int64 == 0 {
 		return 0
