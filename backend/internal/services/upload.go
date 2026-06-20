@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/csv"
 	"fmt"
-	"io"
 	"mime/multipart"
 	"strconv"
 	"strings"
@@ -97,22 +96,22 @@ func (s *UploadService) ParseAndValidate(file *multipart.FileHeader, dataType st
 
 		switch dataType {
 		case "routes":
-			if err := s.insertRoute(tx, row, headerMap); err != nil {
+			if err := s.insertRoute(row, headerMap); err != nil {
 				errors = append(errors, models.ValidationError{Row: rowIdx + 1, Fields: []string{err.Error()}})
 				continue
 			}
 		case "trips":
-			if err := s.insertTrip(tx, row, headerMap); err != nil {
+			if err := s.insertTrip(row, headerMap); err != nil {
 				errors = append(errors, models.ValidationError{Row: rowIdx + 1, Fields: []string{err.Error()}})
 				continue
 			}
 		case "flows":
-			if err := s.insertFlow(tx, row, headerMap); err != nil {
+			if err := s.insertFlow(row, headerMap); err != nil {
 				errors = append(errors, models.ValidationError{Row: rowIdx + 1, Fields: []string{err.Error()}})
 				continue
 			}
 		case "mileages":
-			if err := s.insertMileage(tx, row, headerMap); err != nil {
+			if err := s.insertMileage(row, headerMap); err != nil {
 				errors = append(errors, models.ValidationError{Row: rowIdx + 1, Fields: []string{err.Error()}})
 				continue
 			}
@@ -133,7 +132,7 @@ func (s *UploadService) ParseAndValidate(file *multipart.FileHeader, dataType st
 	}, nil
 }
 
-func (s *UploadService) insertRoute(tx interface{ Exec(string, ...interface{}) (interface{}, error) }, row []string, hm map[string]int) error {
+func (s *UploadService) insertRoute(row []string, hm map[string]int) error {
 	lineNo := strings.TrimSpace(row[hm["线路编号"]])
 	lineName := strings.TrimSpace(row[hm["线路名"]])
 	stations := strings.Split(strings.TrimSpace(row[hm["起讫站"]]), "-")
@@ -167,7 +166,7 @@ func (s *UploadService) insertRoute(tx interface{ Exec(string, ...interface{}) (
 	return err
 }
 
-func (s *UploadService) insertTrip(tx interface{}, row []string, hm map[string]int) error {
+func (s *UploadService) insertTrip(row []string, hm map[string]int) error {
 	lineNo := strings.TrimSpace(row[hm["线路编号"]])
 	dateStr := strings.TrimSpace(row[hm["日期"]])
 	tripNo := strings.TrimSpace(row[hm["班次号"]])
@@ -195,7 +194,7 @@ func (s *UploadService) insertTrip(tx interface{}, row []string, hm map[string]i
 	return err
 }
 
-func (s *UploadService) insertFlow(tx interface{}, row []string, hm map[string]int) error {
+func (s *UploadService) insertFlow(row []string, hm map[string]int) error {
 	lineNo := strings.TrimSpace(row[hm["线路编号"]])
 	dateStr := strings.TrimSpace(row[hm["日期"]])
 	tripNo := strings.TrimSpace(row[hm["班次号"]])
@@ -216,7 +215,7 @@ func (s *UploadService) insertFlow(tx interface{}, row []string, hm map[string]i
 	return err
 }
 
-func (s *UploadService) insertMileage(tx interface{}, row []string, hm map[string]int) error {
+func (s *UploadService) insertMileage(row []string, hm map[string]int) error {
 	vehicleNo := strings.TrimSpace(row[hm["车辆编号"]])
 	dateStr := strings.TrimSpace(row[hm["日期"]])
 	totalKm, _ := strconv.ParseFloat(strings.TrimSpace(row[hm["总里程"]]), 64)

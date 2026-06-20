@@ -2,15 +2,14 @@ FROM golang:1.21-alpine
 
 WORKDIR /app
 
-RUN apk add --no-cache gcc musl-dev
-
-COPY go.mod go.sum ./
+COPY go.mod ./
 RUN go mod download
 
 COPY . .
+RUN rm -f go.sum && go mod tidy
 
-RUN go build -o bus-analytics ./cmd/server
+RUN CGO_ENABLED=0 go build -o /app/bus-analytics ./cmd/server
 
 EXPOSE 8080
 
-CMD ["./bus-analytics"]
+CMD ["/app/bus-analytics"]

@@ -290,7 +290,7 @@ func (h *Handler) GetAllVehicles(c *gin.Context) {
 
 func (h *Handler) GetDateRange(c *gin.Context) {
 	var minDate, maxDate *string
-	db.QueryRow("SELECT MIN(trip_date)::text, MAX(trip_date)::text FROM trips").Scan(&minDate, &maxDate)
+	db.DB.QueryRow("SELECT MIN(trip_date)::text, MAX(trip_date)::text FROM trips").Scan(&minDate, &maxDate)
 	result := make(map[string]interface{})
 	if minDate != nil {
 		result["min_date"] = *minDate
