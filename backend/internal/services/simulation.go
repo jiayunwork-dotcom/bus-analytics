@@ -375,35 +375,39 @@ func (s *SimulationService) getTripCount(lineNo, date string) int {
 
 func (s *SimulationService) calcDailyOperatingSpeedSafe(lineNo, date string) float64 {
 	var totalKm sql.NullFloat64
+	db.DB.QueryRow(`SELECT total_km FROM routes WHERE line_no = $1`, lineNo).Scan(&totalKm)
+	if !totalKm.Valid || totalKm.Float64 <= 0 {
+		return 0
+	}
+
+	var avgInterval sql.NullFloat64
 	db.DB.QueryRow(`
-		SELECT COALESCE(SUM(vm.operating_km), 0)
-		FROM vehicle_mileages vm
-		INNER JOIN (
-			SELECT DISTINCT vehicle_no FROM trips
+		WITH vehicle_trips AS (
+			SELECT vehicle_no, actual_departure_time,
+				LAG(actual_departure_time) OVER (PARTITION BY vehicle_no ORDER BY actual_departure_time) as prev_dep
+			FROM trips
 			WHERE line_no = $1 AND trip_date = $2::date
-		) t ON vm.vehicle_no = t.vehicle_no
-		WHERE vm.mileage_date = $2::date
-	`, lineNo, date).Scan(&totalKm)
+		)
+		SELECT AVG(EXTRACT(EPOCH FROM (actual_departure_time - prev_dep))/3600)
+		FROM vehicle_trips
+		WHERE prev_dep IS NOT NULL
+	`, lineNo, date).Scan(&avgInterval)
 
-	var firstTime, lastTime sql.NullString
-	db.DB.QueryRow(`
-		SELECT MIN(actual_departure_time)::text, MAX(actual_departure_time)::text
-		FROM trips WHERE line_no = $1 AND trip_date = $2::date
-	`, lineNo, date).Scan(&firstTime, &lastTime)
+	if !avgInterval.Valid || avgInterval.Float64 <= 0 {
+		var stationCount sql.NullInt64
+		db.DB.QueryRow(`SELECT station_count FROM routes WHERE line_no = $1`, lineNo).Scan(&stationCount)
+		if stationCount.Valid && stationCount.Int64 > 0 {
+			estimatedTripHours := float64(stationCount.Int64) * 3.0 / 60.0
+			if estimatedTripHours > 0 {
+				speed := totalKm.Float64 / estimatedTripHours
+				return math.Round(speed*100) / 100
+			}
+		}
+		return 0
+	}
 
-	if !totalKm.Valid || !firstTime.Valid || !lastTime.Valid {
-		return 0
-	}
-	ft, err1 := ParseTime(firstTime.String)
-	lt, err2 := ParseTime(lastTime.String)
-	if err1 != nil || err2 != nil {
-		return 0
-	}
-	hours := lt.Sub(ft).Hours()
-	if hours <= 0 {
-		return 0
-	}
-	speed := totalKm.Float64 / hours
+	estimatedTripHours := avgInterval.Float64 * 0.85
+	speed := totalKm.Float64 / estimatedTripHours
 	return math.Round(speed*100) / 100
 }
 
