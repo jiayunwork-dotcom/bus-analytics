@@ -263,3 +263,91 @@ type JointSimResult struct {
 	LineColors     []string      `json:"line_colors"`
 }
 
+type SimPlan struct {
+	ID        int       `json:"id"`
+	Name      string    `json:"name" binding:"required"`
+	Remark    string    `json:"remark"`
+	SimType   string    `json:"sim_type" binding:"required"`
+	Lines     string    `json:"lines"`
+	Params    any       `json:"params"`
+	Result    any       `json:"result"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type SimPlanListItem struct {
+	ID                  int       `json:"id"`
+	Name                string    `json:"name"`
+	Remark              string    `json:"remark"`
+	SimType             string    `json:"sim_type"`
+	Lines               string    `json:"lines"`
+	CreatedAt           time.Time `json:"created_at"`
+	DailyTrips          int       `json:"daily_trips"`
+	PeakLoadFactor      float64   `json:"peak_load_factor"`
+	OperatingSpeed      float64   `json:"operating_speed"`
+	PassengerIntensity  float64   `json:"passenger_intensity"`
+}
+
+type SimPlanCompareRequest struct {
+	PlanIDs []int `json:"plan_ids" binding:"required,min=2,max=4"`
+}
+
+type PlanKPI struct {
+	DailyTrips         int     `json:"daily_trips"`
+	PeakLoadFactor     float64 `json:"peak_load_factor"`
+	OperatingSpeed     float64 `json:"operating_speed"`
+	PassengerIntensity float64 `json:"passenger_intensity"`
+}
+
+type PlanParamDiff struct {
+	Name              string `json:"name"`
+	PeakInterval      int    `json:"peak_interval"`
+	OffPeakInterval   int    `json:"off_peak_interval"`
+	StationDelta      int    `json:"station_delta"`
+}
+
+type SimPlanCompareResult struct {
+	Plans           []SimPlanCompareItem `json:"plans"`
+	JointOverviews  []JointOverviewItem  `json:"joint_overviews"`
+	ParamDiffs      []ParamDiffRow       `json:"param_diffs"`
+	Recommendations []PlanRecommendation `json:"recommendations"`
+}
+
+type SimPlanCompareItem struct {
+	ID                 int       `json:"id"`
+	Name               string    `json:"name"`
+	SimType            string    `json:"sim_type"`
+	Lines              string    `json:"lines"`
+	CreatedAt          time.Time `json:"created_at"`
+	KPI                PlanKPI   `json:"kpi"`
+}
+
+type JointOverviewItem struct {
+	PlanID              int     `json:"plan_id"`
+	PlanName            string  `json:"plan_name"`
+	TotalOrigTrips      int     `json:"total_orig_trips"`
+	TotalNewTrips       int     `json:"total_new_trips"`
+	TotalTripsDelta     int     `json:"total_trips_delta"`
+	TotalTripsChangePct float64 `json:"total_trips_change_pct"`
+	AvgOrigLoadFactor   float64 `json:"avg_orig_load_factor"`
+	AvgNewLoadFactor    float64 `json:"avg_new_load_factor"`
+	AvgLoadFactorDelta  float64 `json:"avg_load_factor_delta"`
+}
+
+type ParamDiffRow struct {
+	ParamName string `json:"param_name"`
+	Values    []ParamDiffValue `json:"values"`
+	Same      bool   `json:"same"`
+}
+
+type ParamDiffValue struct {
+	PlanID  int    `json:"plan_id"`
+	Value   any    `json:"value"`
+	Same    bool   `json:"same"`
+}
+
+type PlanRecommendation struct {
+	PlanID   int    `json:"plan_id"`
+	PlanName string `json:"plan_name"`
+	Reason   string `json:"reason"`
+}
+

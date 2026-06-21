@@ -41,6 +41,7 @@
             <el-form-item>
               <el-button type="primary" :icon="RefreshRight" @click="runSingleSimulation" :loading="loading">运行模拟</el-button>
               <el-button @click="resetSingleForm">重置参数</el-button>
+              <el-button type="success" :icon="FolderOpened" @click="openSaveDialog('single')" :disabled="!singleResult">保存当前方案</el-button>
             </el-form-item>
           </el-form>
         </el-col>
@@ -172,6 +173,7 @@
                   运行联合模拟
                 </el-button>
                 <el-button @click="resetJointForm">重置参数</el-button>
+                <el-button type="success" :icon="FolderOpened" @click="openSaveDialog('joint')" :disabled="!jointResult">保存当前方案</el-button>
               </el-form-item>
             </el-col>
           </el-row>
@@ -550,6 +552,21 @@
       <div class="trend-desc">横轴：裁撤站点数（0~5），纵轴：高峰满载率。多条线路叠加对比。</div>
       <div ref="trendChartJoint" class="chart-container"></div>
     </div>
+
+    <el-dialog v-model="saveDialogVisible" title="保存当前方案" width="480px" :close-on-click-modal="false">
+      <el-form :model="saveForm" label-width="80px">
+        <el-form-item label="方案名称">
+          <el-input v-model="saveForm.name" placeholder="请输入方案名称" maxlength="50" show-word-limit />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="saveForm.remark" type="textarea" :rows="3" placeholder="可选，填写方案备注" maxlength="200" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="saveDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="doSavePlan" :loading="saveLoading">确认保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -557,7 +574,8 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import api from '../api'
 import * as echarts from 'echarts'
-import { RefreshRight, ArrowRight } from '@element-plus/icons-vue'
+import { RefreshRight, ArrowRight, FolderOpened } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 
 const lines = ref([])
 const loading = ref(false)
@@ -735,6 +753,61 @@ const resetJointForm = () => {
   jointLineParamList.value = []
   jointActivePanels.value = ''
   jointResult.value = null
+}
+
+const saveDialogVisible = ref(false)
+const saveLoading = ref(false)
+const saveForm = ref({ name: '', remark: '' })
+const saveMode = ref('single')
+
+const openSaveDialog = (mode) => {
+  saveMode.value = mode
+  saveForm.value = { name: '', remark: '' }
+  saveDialogVisible.value = true
+}
+
+const doSavePlan = async () => {
+  if (!saveForm.value.name.trim()) {
+    ElMessage.warning('请输入方案名称')
+    return
+  }
+  saveLoading.value = true
+  try {
+    if (saveMode.value === 'single') {
+      await api.createPlan({
+        name: saveForm.value.name,
+        remark: saveForm.value.remark,
+        sim_type: 'single',
+        lines: form.value.line_no,
+        params: { ...form.value },
+        result: singleResult.value
+      })
+    } else {
+      const payload = {
+        lines: jointLineParamList.value.map(lp => ({
+          line_no: lp.line_no,
+          peak_interval: lp.peak_interval,
+          off_peak_interval: lp.off_peak_interval,
+          station_delta: lp.station_delta
+        }))
+      }
+      if (jointForm.value.date) payload.date = jointForm.value.date
+      await api.createPlan({
+        name: saveForm.value.name,
+        remark: saveForm.value.remark,
+        sim_type: 'joint',
+        lines: jointForm.value.selected_line_nos.join(','),
+        params: payload,
+        result: jointResult.value
+      })
+    }
+    ElMessage.success('方案保存成功')
+    saveDialogVisible.value = false
+  } catch (e) {
+    ElMessage.error('保存失败: ' + (e.message || '未知错误'))
+  } finally {
+    saveLoading.value = false
+  }
 }
 
 const renderSingleTrendChart = () => {

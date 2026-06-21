@@ -13,6 +13,8 @@ const routes = [
   { path: '/compare', name: 'Compare', component: () => import('../views/Compare.vue') },
   { path: '/compare/health', name: 'LineHealth', component: () => import('../views/LineHealth.vue') },
   { path: '/simulation', name: 'Simulation', component: () => import('../views/Simulation.vue') },
+  { path: '/plan-archive', name: 'PlanArchive', component: () => import('../views/PlanArchive.vue') },
+  { path: '/plan-compare', name: 'PlanCompare', component: () => import('../views/PlanCompare.vue') },
 ]
 
 const router = createRouter({

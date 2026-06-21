@@ -52,6 +52,14 @@
           <el-icon><MagicStick /></el-icon>
           <span>线路调整模拟</span>
         </el-menu-item>
+        <el-menu-item index="/plan-archive">
+          <el-icon><FolderOpened /></el-icon>
+          <span>方案存档</span>
+        </el-menu-item>
+        <el-menu-item index="/plan-compare">
+          <el-icon><DataLine /></el-icon>
+          <span>对比分析</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

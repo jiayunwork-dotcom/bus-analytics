@@ -52,6 +52,19 @@ CREATE INDEX IF NOT EXISTS idx_flows_line_date ON station_flows(line_no, flow_da
 CREATE INDEX IF NOT EXISTS idx_flows_card ON station_flows(card_id, flow_date);
 CREATE INDEX IF NOT EXISTS idx_vehicle_date ON vehicle_mileages(vehicle_no, mileage_date);
 
+CREATE TABLE IF NOT EXISTS sim_plans (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    remark TEXT,
+    sim_type VARCHAR(20) NOT NULL,
+    lines TEXT NOT NULL,
+    params JSONB NOT NULL,
+    result JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sim_plans_created_at ON sim_plans(created_at);
+
 INSERT INTO routes (line_no, line_name, start_station, end_station, total_km, station_count, fare, straight_line_distance_km)
 VALUES
     ('1', '1路', '火车站', '高新区', 18.50, 15, 2.00, 14.20),

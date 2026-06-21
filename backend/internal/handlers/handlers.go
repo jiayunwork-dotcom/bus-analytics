@@ -26,6 +26,7 @@ type Handler struct {
 	comparisonSvc *services.ComparisonService
 	reportSvc     *services.ReportService
 	simulationSvc *services.SimulationService
+	planSvc       *services.PlanService
 }
 
 func NewHandler() *Handler {
@@ -39,6 +40,7 @@ func NewHandler() *Handler {
 		comparisonSvc: services.NewComparisonService(),
 		reportSvc:     services.NewReportService(),
 		simulationSvc: services.NewSimulationService(),
+		planSvc:       services.NewPlanService(),
 	}
 }
 
@@ -356,6 +358,88 @@ func (h *Handler) RunJointSimulation(c *gin.Context) {
 	result, err := h.simulationSvc.RunJointSimulation(&params)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) CreatePlan(c *gin.Context) {
+	var plan models.SimPlan
+	if err := c.ShouldBindJSON(&plan); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误: " + err.Error()})
+		return
+	}
+	if plan.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "方案名称不能为空"})
+		return
+	}
+	if plan.SimType != "single" && plan.SimType != "joint" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "模拟类型无效"})
+		return
+	}
+	result, err := h.planSvc.CreatePlan(&plan)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) ListPlans(c *gin.Context) {
+	sortOrder := c.DefaultQuery("sort", "desc")
+	lineFilter := c.Query("line")
+	result, err := h.planSvc.ListPlans(sortOrder, lineFilter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) GetPlan(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	result, err := h.planSvc.GetPlan(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) DeletePlan(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	if err := h.planSvc.DeletePlan(id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *Handler) RenamePlan(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var req struct {
+		Name string `json:"name" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "方案名称不能为空"})
+		return
+	}
+	if err := h.planSvc.RenamePlan(id, req.Name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *Handler) ComparePlans(c *gin.Context) {
+	var req models.SimPlanCompareRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请选择2~4份方案"})
+		return
+	}
+	result, err := h.planSvc.ComparePlans(req.PlanIDs)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, result)

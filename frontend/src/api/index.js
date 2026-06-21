@@ -48,5 +48,12 @@ export default {
   }),
 
   runLineSimulation: (params) => api.post('/simulation/line', params),
-  runJointSimulation: (params) => api.post('/simulation/joint', params)
+  runJointSimulation: (params) => api.post('/simulation/joint', params),
+
+  createPlan: (data) => api.post('/plans', data),
+  listPlans: (params) => api.get('/plans', { params }),
+  getPlan: (id) => api.get(`/plans/${id}`),
+  deletePlan: (id) => api.delete(`/plans/${id}`),
+  renamePlan: (id, name) => api.put(`/plans/${id}/rename`, { name }),
+  comparePlans: (planIds) => api.post('/plans/compare', { plan_ids: planIds })
 }
