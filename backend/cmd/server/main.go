@@ -59,6 +59,7 @@ func main() {
 		api.POST("/report/export", h.ExportReport)
 
 		api.POST("/simulation/line", h.RunLineSimulation)
+		api.POST("/simulation/joint", h.RunJointSimulation)
 	}
 
 	r.GET("/health", func(c *gin.Context) {

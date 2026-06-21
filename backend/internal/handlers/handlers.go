@@ -330,3 +330,33 @@ func (h *Handler) RunLineSimulation(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+func (h *Handler) RunJointSimulation(c *gin.Context) {
+	var params models.JointSimParams
+	if err := c.ShouldBindJSON(&params); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误: " + err.Error()})
+		return
+	}
+	if len(params.Lines) < 1 || len(params.Lines) > 3 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请选择1~3条线路"})
+		return
+	}
+	seen := make(map[string]bool)
+	for _, lp := range params.Lines {
+		if seen[lp.LineNo] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "不能重复选择线路: " + lp.LineNo})
+			return
+		}
+		seen[lp.LineNo] = true
+		if lp.LineNo == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "存在未选择的线路"})
+			return
+		}
+	}
+	result, err := h.simulationSvc.RunJointSimulation(&params)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}

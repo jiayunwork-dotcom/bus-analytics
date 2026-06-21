@@ -168,6 +168,18 @@ type SimParams struct {
 	Date             string `json:"date"`
 }
 
+type SingleLineSimParams struct {
+	LineNo          string `json:"line_no" binding:"required"`
+	PeakInterval    int    `json:"peak_interval"`
+	OffPeakInterval int    `json:"off_peak_interval"`
+	StationDelta    int    `json:"station_delta"`
+}
+
+type JointSimParams struct {
+	Lines []SingleLineSimParams `json:"lines" binding:"required,min=1,max=3"`
+	Date  string                `json:"date"`
+}
+
 type SimKPI struct {
 	DailyTrips        int     `json:"daily_trips"`
 	PeakLoadFactor    float64 `json:"peak_load_factor"`
@@ -209,5 +221,45 @@ type SimResult struct {
 	NewKPI              SimKPI          `json:"new_kpi"`
 	AdjacentImpacts     []AdjLineImpact `json:"adjacent_impacts"`
 	RemovalTrend        []TrendPoint    `json:"removal_trend"`
+	OrigPeakTrips       int             `json:"orig_peak_trips"`
+	NewPeakTrips        int             `json:"new_peak_trips"`
+}
+
+type SharedVehicleConflict struct {
+	VehicleNo       string   `json:"vehicle_no"`
+	InvolvedLines   []string `json:"involved_lines"`
+	TotalPeakTrips  int      `json:"total_peak_trips"`
+	CapacityLimit   int      `json:"capacity_limit"`
+}
+
+type AdjLineMergedImpact struct {
+	LineNo         string   `json:"line_no"`
+	LineName       string   `json:"line_name"`
+	OrigPeakLoad   float64  `json:"orig_peak_load"`
+	NewPeakLoad    float64  `json:"new_peak_load"`
+	LoadIncrement  float64  `json:"load_increment"`
+	OverloadRisk   bool     `json:"overload_risk"`
+	SharedStations []string `json:"shared_stations"`
+	AffectedBy     []string `json:"affected_by"`
+}
+
+type JointOverview struct {
+	TotalOrigTrips         int                  `json:"total_orig_trips"`
+	TotalNewTrips          int                  `json:"total_new_trips"`
+	TotalTripsDelta        int                  `json:"total_trips_delta"`
+	TotalTripsChangePct    float64              `json:"total_trips_change_pct"`
+	AvgOrigLoadFactor      float64              `json:"avg_orig_load_factor"`
+	AvgNewLoadFactor       float64              `json:"avg_new_load_factor"`
+	AvgLoadFactorDelta     float64              `json:"avg_load_factor_delta"`
+	SharedVehicleConflicts []SharedVehicleConflict `json:"shared_vehicle_conflicts"`
+	HasVehicleConflict     bool                 `json:"has_vehicle_conflict"`
+	MergedAdjacentImpacts  []AdjLineMergedImpact `json:"merged_adjacent_impacts"`
+	AdjacentOverloadCount  int                  `json:"adjacent_overload_count"`
+}
+
+type JointSimResult struct {
+	LineResults    []SimResult   `json:"line_results"`
+	JointOverview  JointOverview `json:"joint_overview"`
+	LineColors     []string      `json:"line_colors"`
 }
 

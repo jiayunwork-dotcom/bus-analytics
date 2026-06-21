@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 )
 
 type SimulationService struct {
@@ -162,6 +163,8 @@ func (s *SimulationService) RunSimulation(params *models.SimParams) (*models.Sim
 		NewKPI:              newKPI,
 		AdjacentImpacts:     adjacentImpacts,
 		RemovalTrend:        removalTrend,
+		OrigPeakTrips:       origPeakTrips,
+		NewPeakTrips:        newPeakTrips,
 	}, nil
 }
 
@@ -688,4 +691,421 @@ func (s *SimulationService) calcRemovalTrend(lineNo, date string, flows []statio
 	}
 
 	return result
+}
+
+var lineColors = []string{"#409eff", "#67c23a", "#e6a23c", "#f56c6c", "#909399"}
+
+func (s *SimulationService) RunJointSimulation(params *models.JointSimParams) (*models.JointSimResult, error) {
+	if len(params.Lines) < 1 || len(params.Lines) > 3 {
+		return nil, fmt.Errorf("请选择1~3条线路")
+	}
+
+	seen := make(map[string]bool)
+	for _, lp := range params.Lines {
+		if seen[lp.LineNo] {
+			return nil, fmt.Errorf("不能重复选择线路: %s", lp.LineNo)
+		}
+		seen[lp.LineNo] = true
+	}
+
+	lineResults := make([]models.SimResult, 0, len(params.Lines))
+	lineParamsMap := make(map[string]models.SingleLineSimParams)
+	date := params.Date
+	for _, lp := range params.Lines {
+		lineParamsMap[lp.LineNo] = lp
+	}
+
+	selectedLineSet := make(map[string]bool)
+	for _, lp := range params.Lines {
+		selectedLineSet[lp.LineNo] = true
+	}
+
+	for _, lp := range params.Lines {
+		sp := &models.SimParams{
+			LineNo:          lp.LineNo,
+			PeakInterval:    lp.PeakInterval,
+			OffPeakInterval: lp.OffPeakInterval,
+			StationDelta:    lp.StationDelta,
+			Date:            date,
+		}
+		sr, err := s.RunSimulation(sp)
+		if err != nil {
+			return nil, err
+		}
+		lineResults = append(lineResults, *sr)
+	}
+
+	if len(lineResults) >= 2 {
+		s.recalcCrossStationImpacts(lineResults, selectedLineSet, date, lineParamsMap)
+	}
+
+	conflicts := s.calcSharedVehicleConflicts(lineResults, selectedLineSet, date)
+
+	mergedAdjImpacts, adjOverloadCount := s.mergeAdjacentImpacts(lineResults, selectedLineSet, date)
+
+	jointOverview := s.buildJointOverview(lineResults, conflicts, mergedAdjImpacts, adjOverloadCount)
+
+	colors := make([]string, len(lineResults))
+	for i := range lineResults {
+		if i < len(lineColors) {
+			colors[i] = lineColors[i]
+		} else {
+			colors[i] = lineColors[len(lineColors)-1]
+		}
+	}
+
+	return &models.JointSimResult{
+		LineResults:   lineResults,
+		JointOverview: jointOverview,
+		LineColors:    colors,
+	}, nil
+}
+
+func (s *SimulationService) buildJointOverview(lineResults []models.SimResult, conflicts []models.SharedVehicleConflict, mergedAdjImpacts []models.AdjLineMergedImpact, adjOverloadCount int) models.JointOverview {
+	totalOrigTrips := 0
+	totalNewTrips := 0
+	totalOrigLoad := 0.0
+	totalNewLoad := 0.0
+
+	for _, lr := range lineResults {
+		totalOrigTrips += lr.OrigTotalTrips
+		totalNewTrips += lr.NewTotalTrips
+		totalOrigLoad += lr.OrigKPI.PeakLoadFactor
+		totalNewLoad += lr.NewKPI.PeakLoadFactor
+	}
+
+	n := float64(len(lineResults))
+	avgOrig := 0.0
+	avgNew := 0.0
+	if n > 0 {
+		avgOrig = math.Round(totalOrigLoad/n*10000) / 10000
+		avgNew = math.Round(totalNewLoad/n*10000) / 10000
+	}
+
+	pct := 0.0
+	if totalOrigTrips > 0 {
+		pct = math.Round(float64(totalNewTrips-totalOrigTrips)/float64(totalOrigTrips)*10000) / 100
+	}
+
+	return models.JointOverview{
+		TotalOrigTrips:         totalOrigTrips,
+		TotalNewTrips:          totalNewTrips,
+		TotalTripsDelta:        totalNewTrips - totalOrigTrips,
+		TotalTripsChangePct:    pct,
+		AvgOrigLoadFactor:      avgOrig,
+		AvgNewLoadFactor:       avgNew,
+		AvgLoadFactorDelta:     math.Round((avgNew-avgOrig)*10000) / 10000,
+		SharedVehicleConflicts: conflicts,
+		HasVehicleConflict:     len(conflicts) > 0,
+		MergedAdjacentImpacts:  mergedAdjImpacts,
+		AdjacentOverloadCount:  adjOverloadCount,
+	}
+}
+
+func (s *SimulationService) getVehiclesForLines(lineNos []string, date string) map[string][]string {
+	result := make(map[string][]string)
+	if len(lineNos) == 0 {
+		return result
+	}
+
+	placeholders := make([]string, len(lineNos))
+	args := make([]interface{}, len(lineNos)+1)
+	for i, ln := range lineNos {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = ln
+	}
+	args[len(lineNos)] = date
+
+	query := fmt.Sprintf(`
+		SELECT DISTINCT line_no, vehicle_no
+		FROM trips
+		WHERE line_no IN (%s) AND trip_date = $%d::date
+		ORDER BY line_no, vehicle_no
+	`, strings.Join(placeholders, ","), len(lineNos)+1)
+
+	rows, err := db.DB.Query(query, args...)
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ln, vn string
+		if err := rows.Scan(&ln, &vn); err == nil {
+			result[ln] = append(result[ln], vn)
+		}
+	}
+	return result
+}
+
+func (s *SimulationService) calcSharedVehicleConflicts(lineResults []models.SimResult, selectedLineSet map[string]bool, date string) []models.SharedVehicleConflict {
+	lineNos := make([]string, 0, len(lineResults))
+	for _, lr := range lineResults {
+		lineNos = append(lineNos, lr.LineNo)
+	}
+
+	vehicleToLines := make(map[string]map[string]bool)
+	vehiclesByLine := s.getVehiclesForLines(lineNos, date)
+	for ln, vs := range vehiclesByLine {
+		for _, v := range vs {
+			if vehicleToLines[v] == nil {
+				vehicleToLines[v] = make(map[string]bool)
+			}
+			vehicleToLines[v][ln] = true
+		}
+	}
+
+	peakTripsByLine := make(map[string]int)
+	for _, lr := range lineResults {
+		peakTripsByLine[lr.LineNo] = lr.NewPeakTrips
+	}
+
+	vehicleDailyCapacity := s.estimateVehicleDailyPeakCapacity(date)
+
+	conflicts := []models.SharedVehicleConflict{}
+	for vn, lineSet := range vehicleToLines {
+		if len(lineSet) < 2 {
+			continue
+		}
+		totalPeak := 0
+		involvedLines := []string{}
+		for ln := range lineSet {
+			totalPeak += peakTripsByLine[ln]
+			involvedLines = append(involvedLines, ln)
+		}
+		sort.Strings(involvedLines)
+		capLimit := vehicleDailyCapacity
+		if totalPeak > capLimit {
+			conflicts = append(conflicts, models.SharedVehicleConflict{
+				VehicleNo:      vn,
+				InvolvedLines:  involvedLines,
+				TotalPeakTrips: totalPeak,
+				CapacityLimit:  capLimit,
+			})
+		}
+	}
+
+	sort.Slice(conflicts, func(i, j int) bool {
+		return conflicts[i].VehicleNo < conflicts[j].VehicleNo
+	})
+	return conflicts
+}
+
+func (s *SimulationService) estimateVehicleDailyPeakCapacity(date string) int {
+	peakHours := s.getPeakHours()
+	minPeakInterval := MinInterval
+	if minPeakInterval <= 0 {
+		minPeakInterval = 3
+	}
+	if peakHours <= 0 {
+		return 40
+	}
+	cap := int(math.Ceil(peakHours * 60 / float64(minPeakInterval)))
+	if cap < 20 {
+		cap = 20
+	}
+	return cap
+}
+
+type lineFlowContext struct {
+	flows          []stationFlow
+	removeIndexes  []int
+	removedStations map[string]int
+	sharedStations map[string]bool
+	stationDelta   int
+}
+
+func (s *SimulationService) recalcCrossStationImpacts(lineResults []models.SimResult, selectedSet map[string]bool, date string, lineParamsMap map[string]models.SingleLineSimParams) {
+	lineCtxMap := make(map[string]*lineFlowContext)
+
+	for i := range lineResults {
+		lr := &lineResults[i]
+		lp := lineParamsMap[lr.LineNo]
+		flows := s.getAggregatedStationFlows(lr.LineNo, date)
+		shared := s.getSharedStationNames(lr.LineNo)
+		removeCount := 0
+		if lp.StationDelta < 0 {
+			removeCount = -lp.StationDelta
+		}
+		indexes := s.getRemoveIndexes(flows, removeCount, shared)
+
+		removed := make(map[string]int)
+		for _, idx := range indexes {
+			if idx >= 0 && idx < len(flows) {
+				removed[flows[idx].StationName] = flows[idx].BoardCount
+			}
+		}
+
+		lineCtxMap[lr.LineNo] = &lineFlowContext{
+			flows:           flows,
+			removeIndexes:   indexes,
+			removedStations: removed,
+			sharedStations:  shared,
+			stationDelta:    lp.StationDelta,
+		}
+	}
+
+	for i := range lineResults {
+		lr := &lineResults[i]
+		ctx := lineCtxMap[lr.LineNo]
+		if ctx.stationDelta >= 0 {
+			continue
+		}
+		if len(ctx.removedStations) == 0 {
+			continue
+		}
+
+		newAdjImpacts := s.calcAdjacentImpactsWithCross(lr.LineNo, ctx, lineCtxMap, selectedSet, date)
+		lr.AdjacentImpacts = newAdjImpacts
+	}
+}
+
+func (s *SimulationService) calcAdjacentImpactsWithCross(targetLineNo string, ctx *lineFlowContext, allCtx map[string]*lineFlowContext, selectedSet map[string]bool, date string) []models.AdjLineImpact {
+	result := []models.AdjLineImpact{}
+
+	if len(ctx.removedStations) == 0 {
+		return result
+	}
+
+	allLines := s.getAllLines()
+	for _, line := range allLines {
+		if line.LineNo == targetLineNo {
+			continue
+		}
+
+		adjCtx := allCtx[line.LineNo]
+		adjIsSelected := selectedSet[line.LineNo]
+
+		sharedWithAdj := s.getSharedStations(line.LineNo, ctx.removedStations)
+		if len(sharedWithAdj) == 0 {
+			continue
+		}
+
+		var origPeakLoad float64
+		origPeakLoad, _ = s.metricsSvc.calcDailyLoadFactor(line.LineNo, date)
+
+		adjAlsoRemovedSet := make(map[string]bool)
+		if adjIsSelected && adjCtx != nil {
+			for st := range adjCtx.removedStations {
+				adjAlsoRemovedSet[st] = true
+			}
+		}
+
+		transferPax := 0
+		for _, st := range sharedWithAdj {
+			boardCnt, ok := ctx.removedStations[st]
+			if !ok {
+				continue
+			}
+			baseRatio := 0.3
+			if adjIsSelected {
+				if adjAlsoRemovedSet[st] {
+					baseRatio = 0.0
+				} else {
+					baseRatio = 0.5
+				}
+			}
+			transferPax += int(float64(boardCnt) * baseRatio)
+		}
+
+		adjTrips := s.getTripCount(line.LineNo, date)
+		additionalLoad := 0.0
+		if adjTrips > 0 {
+			additionalLoad = float64(transferPax) / float64(adjTrips) / RatedCapacity
+		}
+
+		newPeakLoad := origPeakLoad + additionalLoad
+		if newPeakLoad > 1.0 {
+			newPeakLoad = 1.0
+		}
+		overloadRisk := newPeakLoad > 0.9
+
+		result = append(result, models.AdjLineImpact{
+			LineNo:         line.LineNo,
+			LineName:       line.LineName,
+			OrigPeakLoad:   origPeakLoad,
+			NewPeakLoad:    math.Round(newPeakLoad*10000) / 10000,
+			LoadIncrement:  math.Round(additionalLoad*10000) / 10000,
+			OverloadRisk:   overloadRisk,
+			SharedStations: sharedWithAdj,
+		})
+	}
+
+	return result
+}
+
+func (s *SimulationService) mergeAdjacentImpacts(lineResults []models.SimResult, selectedSet map[string]bool, date string) ([]models.AdjLineMergedImpact, int) {
+	type accumulator struct {
+		lineNo         string
+		lineName       string
+		origPeakLoad   float64
+		totalIncrement float64
+		sharedSet      map[string]bool
+		affectedBySet  map[string]bool
+	}
+
+	accMap := make(map[string]*accumulator)
+
+	for _, lr := range lineResults {
+		for _, adj := range lr.AdjacentImpacts {
+			a, ok := accMap[adj.LineNo]
+			if !ok {
+				a = &accumulator{
+					lineNo:        adj.LineNo,
+					lineName:      adj.LineName,
+					origPeakLoad:  adj.OrigPeakLoad,
+					sharedSet:     make(map[string]bool),
+					affectedBySet: make(map[string]bool),
+				}
+				accMap[adj.LineNo] = a
+			}
+			a.totalIncrement += adj.LoadIncrement
+			for _, st := range adj.SharedStations {
+				a.sharedSet[st] = true
+			}
+			a.affectedBySet[lr.LineNo] = true
+		}
+	}
+
+	merged := []models.AdjLineMergedImpact{}
+	overloadCount := 0
+	for _, a := range accMap {
+		sharedList := []string{}
+		for st := range a.sharedSet {
+			sharedList = append(sharedList, st)
+		}
+		sort.Strings(sharedList)
+
+		affectedList := []string{}
+		for ln := range a.affectedBySet {
+			affectedList = append(affectedList, ln)
+		}
+		sort.Strings(affectedList)
+
+		newLoad := a.origPeakLoad + a.totalIncrement
+		if newLoad > 1.0 {
+			newLoad = 1.0
+		}
+		overloadRisk := newLoad > 0.9
+		if overloadRisk {
+			overloadCount++
+		}
+
+		merged = append(merged, models.AdjLineMergedImpact{
+			LineNo:         a.lineNo,
+			LineName:       a.lineName,
+			OrigPeakLoad:   math.Round(a.origPeakLoad*10000) / 10000,
+			NewPeakLoad:    math.Round(newLoad*10000) / 10000,
+			LoadIncrement:  math.Round(a.totalIncrement*10000) / 10000,
+			OverloadRisk:   overloadRisk,
+			SharedStations: sharedList,
+			AffectedBy:     affectedList,
+		})
+	}
+
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].LoadIncrement > merged[j].LoadIncrement
+	})
+
+	return merged, overloadCount
 }

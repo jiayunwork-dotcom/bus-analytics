@@ -47,5 +47,6 @@ export default {
     responseType: 'blob'
   }),
 
-  runLineSimulation: (params) => api.post('/simulation/line', params)
+  runLineSimulation: (params) => api.post('/simulation/line', params),
+  runJointSimulation: (params) => api.post('/simulation/joint', params)
 }
