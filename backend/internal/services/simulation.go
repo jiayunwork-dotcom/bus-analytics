@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+	"sort"
 )
 
 type SimulationService struct {
@@ -82,7 +83,7 @@ func (s *SimulationService) RunSimulation(params *models.SimParams) (*models.Sim
 
 	origDailyPassengers := s.getDailyPassengers(params.LineNo, date)
 	origPeakLoad, _ := s.metricsSvc.calcDailyLoadFactor(params.LineNo, date)
-	origOperatingSpeed := s.metricsSvc.calcDailyOperatingSpeed(params.LineNo, date)
+	origOperatingSpeed := s.calcDailyOperatingSpeedSafe(params.LineNo, date)
 	origPassengerIntensity := 0.0
 	if lineInfo.TotalKm > 0 {
 		origPassengerIntensity = float64(origDailyPassengers) / lineInfo.TotalKm
@@ -97,16 +98,17 @@ func (s *SimulationService) RunSimulation(params *models.SimParams) (*models.Sim
 
 	stationDelta := params.StationDelta
 	flows := s.getAggregatedStationFlows(params.LineNo, date)
-	adjustedFlows := s.adjustStationFlows(flows, stationDelta, origStationCount)
+	sharedStations := s.getSharedStationNames(params.LineNo)
+	adjustedFlows := s.adjustStationFlows(flows, stationDelta, sharedStations)
 
 	newDailyPassengers := origDailyPassengers
 	if stationDelta < 0 {
-		removedCount := -stationDelta
-		if removedCount >= len(flows) {
-			removedCount = len(flows) - 2
-		}
-		for i := len(flows) - removedCount; i < len(flows) && i > 0; i++ {
-			newDailyPassengers -= int(float64(flows[i].BoardCount) * 0.3)
+		removeCount := -stationDelta
+		removeIndexes := s.getRemoveIndexes(flows, removeCount, sharedStations)
+		for _, idx := range removeIndexes {
+			if idx >= 0 && idx < len(flows) {
+				newDailyPassengers -= int(float64(flows[idx].BoardCount) * 0.3)
+			}
 		}
 		if newDailyPassengers < 0 {
 			newDailyPassengers = 0
@@ -137,9 +139,9 @@ func (s *SimulationService) RunSimulation(params *models.SimParams) (*models.Sim
 		PassengerIntensity: newPassengerIntensity,
 	}
 
-	adjacentImpacts := s.calcAdjacentImpacts(params.LineNo, stationDelta, flows, date)
+	adjacentImpacts := s.calcAdjacentImpacts(params.LineNo, stationDelta, flows, sharedStations, date)
 
-	removalTrend := s.calcRemovalTrend(params.LineNo, date, flows, origStationCount, origPeakLoad, origTotalTrips, origPeakInterval)
+	removalTrend := s.calcRemovalTrend(params.LineNo, date, flows, sharedStations, origStationCount, origPeakLoad, origPeakInterval)
 
 	return &models.SimResult{
 		LineNo:              params.LineNo,
@@ -371,7 +373,103 @@ func (s *SimulationService) getTripCount(lineNo, date string) int {
 	return 1
 }
 
-func (s *SimulationService) adjustStationFlows(flows []stationFlow, delta, origCount int) []stationFlow {
+func (s *SimulationService) calcDailyOperatingSpeedSafe(lineNo, date string) float64 {
+	var totalKm sql.NullFloat64
+	db.DB.QueryRow(`
+		SELECT COALESCE(SUM(vm.operating_km), 0)
+		FROM vehicle_mileages vm
+		INNER JOIN (
+			SELECT DISTINCT vehicle_no FROM trips
+			WHERE line_no = $1 AND trip_date = $2::date
+		) t ON vm.vehicle_no = t.vehicle_no
+		WHERE vm.mileage_date = $2::date
+	`, lineNo, date).Scan(&totalKm)
+
+	var firstTime, lastTime sql.NullString
+	db.DB.QueryRow(`
+		SELECT MIN(actual_departure_time)::text, MAX(actual_departure_time)::text
+		FROM trips WHERE line_no = $1 AND trip_date = $2::date
+	`, lineNo, date).Scan(&firstTime, &lastTime)
+
+	if !totalKm.Valid || !firstTime.Valid || !lastTime.Valid {
+		return 0
+	}
+	ft, err1 := ParseTime(firstTime.String)
+	lt, err2 := ParseTime(lastTime.String)
+	if err1 != nil || err2 != nil {
+		return 0
+	}
+	hours := lt.Sub(ft).Hours()
+	if hours <= 0 {
+		return 0
+	}
+	speed := totalKm.Float64 / hours
+	return math.Round(speed*100) / 100
+}
+
+func (s *SimulationService) getSharedStationNames(lineNo string) map[string]bool {
+	shared := make(map[string]bool)
+	rows, err := db.DB.Query(`
+		SELECT DISTINCT sf.station_name
+		FROM station_flows sf
+		WHERE sf.line_no = $1
+		AND EXISTS (
+			SELECT 1 FROM station_flows sf2
+			WHERE sf2.station_name = sf.station_name
+			AND sf2.line_no <> sf.line_no
+		)
+	`, lineNo)
+	if err != nil {
+		return shared
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err == nil {
+			shared[name] = true
+		}
+	}
+	return shared
+}
+
+func (s *SimulationService) getRemoveIndexes(flows []stationFlow, removeCount int, sharedStations map[string]bool) []int {
+	result := []int{}
+	if removeCount <= 0 || len(flows) <= 2 {
+		return result
+	}
+	maxRemove := len(flows) - 2
+	if removeCount > maxRemove {
+		removeCount = maxRemove
+	}
+
+	allIndexes := []int{}
+	for i := 1; i < len(flows)-1; i++ {
+		allIndexes = append(allIndexes, i)
+	}
+
+	sharedIndexes := []int{}
+	nonSharedIndexes := []int{}
+	for _, idx := range allIndexes {
+		if sharedStations[flows[idx].StationName] {
+			sharedIndexes = append(sharedIndexes, idx)
+		} else {
+			nonSharedIndexes = append(nonSharedIndexes, idx)
+		}
+	}
+
+	for i := len(sharedIndexes) - 1; i >= 0 && len(result) < removeCount; i-- {
+		result = append(result, sharedIndexes[i])
+	}
+
+	for i := len(nonSharedIndexes) - 1; i >= 0 && len(result) < removeCount; i-- {
+		result = append(result, nonSharedIndexes[i])
+	}
+
+	sort.Sort(sort.Reverse(sort.IntSlice(result)))
+	return result
+}
+
+func (s *SimulationService) adjustStationFlows(flows []stationFlow, delta int, sharedStations map[string]bool) []stationFlow {
 	if len(flows) == 0 || delta == 0 {
 		return flows
 	}
@@ -388,16 +486,10 @@ func (s *SimulationService) adjustStationFlows(flows []stationFlow, delta, origC
 
 	if delta < 0 {
 		removeCount := -delta
-		if removeCount >= len(result) {
-			removeCount = len(result) - 2
-		}
-		for i := 0; i < removeCount; i++ {
-			if len(result) <= 2 {
-				break
-			}
-			removeIdx := len(result) - 2
-			if removeIdx < 1 {
-				removeIdx = 1
+		indexes := s.getRemoveIndexes(result, removeCount, sharedStations)
+		for _, removeIdx := range indexes {
+			if removeIdx < 1 || removeIdx >= len(result)-1 {
+				continue
 			}
 			removed := result[removeIdx]
 			prevIdx := removeIdx - 1
@@ -464,10 +556,10 @@ func (s *SimulationService) calcNewPeakLoad(flows []stationFlow, newTrips int, o
 	if load < 0 {
 		load = 0
 	}
-	return math.Round(load*10000) / 100
+	return math.Round(load*10000) / 10000
 }
 
-func (s *SimulationService) calcAdjacentImpacts(targetLineNo string, stationDelta int, origFlows []stationFlow, date string) []models.AdjLineImpact {
+func (s *SimulationService) calcAdjacentImpacts(targetLineNo string, stationDelta int, origFlows []stationFlow, sharedStations map[string]bool, date string) []models.AdjLineImpact {
 	result := []models.AdjLineImpact{}
 
 	if stationDelta >= 0 || len(origFlows) == 0 {
@@ -475,13 +567,10 @@ func (s *SimulationService) calcAdjacentImpacts(targetLineNo string, stationDelt
 	}
 
 	removeCount := -stationDelta
-	if removeCount >= len(origFlows) {
-		removeCount = len(origFlows) - 2
-	}
+	removeIndexes := s.getRemoveIndexes(origFlows, removeCount, sharedStations)
 
 	removedStations := make(map[string]int)
-	for i := 0; i < removeCount; i++ {
-		idx := len(origFlows) - 2 - i
+	for _, idx := range removeIndexes {
 		if idx >= 0 && idx < len(origFlows) {
 			removedStations[origFlows[idx].StationName] = origFlows[idx].BoardCount
 		}
@@ -492,8 +581,8 @@ func (s *SimulationService) calcAdjacentImpacts(targetLineNo string, stationDelt
 		if line.LineNo == targetLineNo {
 			continue
 		}
-		sharedStations := s.getSharedStations(line.LineNo, removedStations)
-		if len(sharedStations) == 0 {
+		sharedWithAdj := s.getSharedStations(line.LineNo, removedStations)
+		if len(sharedWithAdj) == 0 {
 			continue
 		}
 
@@ -501,7 +590,7 @@ func (s *SimulationService) calcAdjacentImpacts(targetLineNo string, stationDelt
 		origPeakLoad, _ = s.metricsSvc.calcDailyLoadFactor(line.LineNo, date)
 
 		transferPax := 0
-		for _, st := range sharedStations {
+		for _, st := range sharedWithAdj {
 			if cnt, ok := removedStations[st]; ok {
 				transferPax += int(float64(cnt) * 0.3)
 			}
@@ -523,10 +612,10 @@ func (s *SimulationService) calcAdjacentImpacts(targetLineNo string, stationDelt
 			LineNo:         line.LineNo,
 			LineName:       line.LineName,
 			OrigPeakLoad:   origPeakLoad,
-			NewPeakLoad:    math.Round(newPeakLoad*10000) / 100,
-			LoadIncrement:  math.Round(additionalLoad*10000) / 100,
+			NewPeakLoad:    math.Round(newPeakLoad*10000) / 10000,
+			LoadIncrement:  math.Round(additionalLoad*10000) / 10000,
 			OverloadRisk:   overloadRisk,
-			SharedStations: sharedStations,
+			SharedStations: sharedWithAdj,
 		})
 	}
 
@@ -576,7 +665,7 @@ func (s *SimulationService) getSharedStations(lineNo string, stations map[string
 	return result
 }
 
-func (s *SimulationService) calcRemovalTrend(lineNo, date string, flows []stationFlow, origStationCount int, origPeakLoad float64, origTrips int, origPeakInterval int) []models.TrendPoint {
+func (s *SimulationService) calcRemovalTrend(lineNo, date string, flows []stationFlow, sharedStations map[string]bool, origStationCount int, origPeakLoad float64, origPeakInterval int) []models.TrendPoint {
 	result := []models.TrendPoint{}
 
 	result = append(result, models.TrendPoint{
@@ -585,19 +674,8 @@ func (s *SimulationService) calcRemovalTrend(lineNo, date string, flows []statio
 	})
 
 	for removeCount := 1; removeCount <= 5; removeCount++ {
-		adjustedFlows := s.adjustStationFlows(flows, -removeCount, origStationCount)
-		newPeakInterval := origPeakInterval
-		newTrips := origTrips
-		load := s.calcNewPeakLoad(adjustedFlows, newTrips, origPeakLoad, newPeakInterval, origPeakInterval)
-
-		remainingStations := origStationCount - removeCount
-		if remainingStations < 2 {
-			remainingStations = 2
-		}
-		if origStationCount > 0 {
-			speedRatio := float64(origStationCount) / float64(remainingStations)
-			_ = speedRatio
-		}
+		adjustedFlows := s.adjustStationFlows(flows, -removeCount, sharedStations)
+		load := s.calcNewPeakLoad(adjustedFlows, 0, origPeakLoad, origPeakInterval, origPeakInterval)
 
 		result = append(result, models.TrendPoint{
 			RemoveCount:    removeCount,
