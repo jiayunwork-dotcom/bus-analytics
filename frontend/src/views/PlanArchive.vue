@@ -3,22 +3,25 @@
     <div class="section-card">
       <div class="section-title">
         方案存档
-        <el-button
-          type="primary"
-          :disabled="selectedPlans.length < 2 || selectedPlans.length > 4"
-          style="margin-left: 24px;"
-          @click="goCompare"
-        >
-          开始对比
-        </el-button>
-        <el-button
-          type="success"
-          :disabled="selectedPlans.length !== 1"
-          style="margin-left: 12px;"
-          @click="goTrend"
-        >
-          查看趋势
-        </el-button>
+        <template v-if="selectedPlans.length === 1">
+          <el-button
+            type="success"
+            style="margin-left: 24px;"
+            @click="goTrend"
+          >
+            查看趋势
+          </el-button>
+        </template>
+        <template v-else>
+          <el-button
+            type="primary"
+            :disabled="selectedPlans.length < 2 || selectedPlans.length > 4"
+            style="margin-left: 24px;"
+            @click="goCompare"
+          >
+            开始对比
+          </el-button>
+        </template>
         <span v-if="selectedPlans.length > 0" style="margin-left: 12px; color: #909399; font-size: 13px;">
           已选 {{ selectedPlans.length }}/4 个方案
         </span>
