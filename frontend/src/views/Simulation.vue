@@ -1,12 +1,21 @@
 <template>
   <div class="page-container">
     <div class="section-card">
-      <div class="section-title">
-        线路调整模拟
+      <div class="section-title sim-section-title">
+        <span class="title-text">线路调整模拟</span>
         <el-radio-group v-model="simMode" size="default" style="margin-left: 24px;" @change="onModeChange">
           <el-radio-button value="single">单线路调整</el-radio-button>
           <el-radio-button value="joint">多线路联合调整</el-radio-button>
         </el-radio-group>
+        <el-button
+          type="success"
+          :icon="FolderOpened"
+          style="margin-left: auto;"
+          @click="openSaveDialog(simMode)"
+          :disabled="!hasCurrentResult"
+        >
+          保存当前方案
+        </el-button>
       </div>
 
       <!-- 单线路模式 -->
@@ -41,7 +50,6 @@
             <el-form-item>
               <el-button type="primary" :icon="RefreshRight" @click="runSingleSimulation" :loading="loading">运行模拟</el-button>
               <el-button @click="resetSingleForm">重置参数</el-button>
-              <el-button type="success" :icon="FolderOpened" @click="openSaveDialog('single')" :disabled="!singleResult">保存当前方案</el-button>
             </el-form-item>
           </el-form>
         </el-col>
@@ -173,7 +181,6 @@
                   运行联合模拟
                 </el-button>
                 <el-button @click="resetJointForm">重置参数</el-button>
-                <el-button type="success" :icon="FolderOpened" @click="openSaveDialog('joint')" :disabled="!jointResult">保存当前方案</el-button>
               </el-form-item>
             </el-col>
           </el-row>
@@ -741,6 +748,11 @@ const runJointSimulation = async () => {
   }
 }
 
+const hasCurrentResult = computed(() => {
+  if (simMode.value === 'single') return !!singleResult.value
+  return !!jointResult.value
+})
+
 const resetSingleForm = () => {
   form.value.peak_interval = 8
   form.value.off_peak_interval = 15
@@ -974,6 +986,19 @@ window.addEventListener('resize', () => {
 </script>
 
 <style scoped>
+.sim-section-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.sim-section-title .title-text {
+  font-size: 17px;
+  font-weight: 600;
+  color: #303133;
+}
+
 .panel-title {
   font-size: 15px;
   font-weight: 600;

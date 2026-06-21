@@ -14,7 +14,7 @@
                 <span :style="{ color: planColors[idx % planColors.length] }">●</span>
                 {{ plan.name }}
               </div>
-              <div class="plan-summary-meta">{{ plan.created_at }}</div>
+              <div class="plan-summary-meta">{{ formatDateTime(plan.created_at) }}</div>
               <div class="plan-summary-lines">
                 <el-tag
                   v-for="ln in plan.lines.split(',')"
@@ -78,21 +78,18 @@
 
       <div v-if="data.param_diffs.length" class="section-card">
         <div class="section-title">参数差异对比</div>
-        <el-table :data="data.param_diffs" border stripe>
-          <el-table-column prop="param_name" label="参数名称" width="180" />
+        <el-table :data="data.param_diffs" border stripe class="param-diff-table" :cell-class-name="getParamCellClassName">
+          <el-table-column prop="param_name" label="参数名称" width="180" class-name="param-name-col" />
           <el-table-column
             v-for="(plan, idx) in data.plans"
             :key="plan.id"
             :label="plan.name"
             align="center"
             min-width="140"
+            :class-name="'plan-col-' + idx"
           >
             <template #default="{ row }">
-              <div
-                class="param-cell"
-                :class="getParamCellClass(row, plan.id)"
-                :style="getParamCellStyle(row, plan.id, idx)"
-              >
+              <div class="param-cell-text" :style="getParamCellStyle(row, plan.id, idx)">
                 {{ getParamValue(row, plan.id) }}
               </div>
             </template>
@@ -129,6 +126,14 @@ const planIds = ref([])
 
 const planColors = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c']
 
+const formatDateTime = (isoStr) => {
+  if (!isoStr) return '-'
+  const d = new Date(isoStr)
+  if (isNaN(d.getTime())) return isoStr
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
 const hasJoint = computed(() => {
   if (!data.value) return false
   return data.value.plans.some(p => p.sim_type === 'joint')
@@ -145,16 +150,22 @@ const getParamValue = (row, planId) => {
   return v ? v.value : '-'
 }
 
-const getParamCellClass = (row, planId) => {
-  const v = row.values.find(x => x.plan_id === planId)
+const getParamCellClassName = ({ row, columnIndex }) => {
+  if (!data.value) return ''
+  const planCount = data.value.plans.length
+  if (columnIndex < 1 || columnIndex > planCount) return ''
+  const planIdx = columnIndex - 1
+  const plan = data.value.plans[planIdx]
+  if (!plan) return ''
+  const v = row.values.find(x => x.plan_id === plan.id)
   if (!v || v.same) return 'param-cell-same'
-  return 'param-cell-diff'
+  return 'param-cell-diff-' + (planIdx % planColors.length)
 }
 
 const getParamCellStyle = (row, planId, idx) => {
   const v = row.values.find(x => x.plan_id === planId)
   if (!v || v.same) return {}
-  return { color: planColors[idx % planColors.length] }
+  return { color: planColors[idx % planColors.length], fontWeight: 700 }
 }
 
 const renderKpiChart = () => {
@@ -257,21 +268,29 @@ onBeforeUnmount(() => {
   gap: 0;
 }
 
-.param-cell {
-  padding: 4px 8px;
-  border-radius: 4px;
-  display: inline-block;
-  min-width: 50px;
+.param-diff-table :deep(.param-cell-same) {
+  background: #f5f7fa !important;
+  color: #909399 !important;
 }
 
-.param-cell-same {
-  background: #f5f7fa;
-  color: #909399;
+.param-diff-table :deep(.param-cell-diff-0) {
+  background: rgba(64, 158, 255, 0.1) !important;
 }
 
-.param-cell-diff {
-  background: #fdf6ec;
-  font-weight: 700;
+.param-diff-table :deep(.param-cell-diff-1) {
+  background: rgba(103, 194, 58, 0.1) !important;
+}
+
+.param-diff-table :deep(.param-cell-diff-2) {
+  background: rgba(230, 162, 60, 0.1) !important;
+}
+
+.param-diff-table :deep(.param-cell-diff-3) {
+  background: rgba(245, 108, 108, 0.1) !important;
+}
+
+.param-cell-text {
+  padding: 2px 0;
 }
 
 .recommend-cell {

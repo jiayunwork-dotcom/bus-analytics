@@ -83,7 +83,7 @@
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="180" align="center">
-          <template #default="{ row }">{{ row.created_at }}</template>
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="160" align="center" fixed="right">
           <template #default="{ row }">
@@ -131,6 +131,14 @@ const filterLine = ref('')
 const selectedPlans = ref([])
 const renamePopoverVisible = reactive({})
 const renameValue = ref('')
+
+const formatDateTime = (isoStr) => {
+  if (!isoStr) return '-'
+  const d = new Date(isoStr)
+  if (isNaN(d.getTime())) return isoStr
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
 
 const loadPlans = async () => {
   const params = { sort: sortOrder.value }
