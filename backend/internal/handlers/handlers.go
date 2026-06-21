@@ -444,3 +444,13 @@ func (h *Handler) ComparePlans(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+func (h *Handler) GetPlanHistoryByLine(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	result, err := h.planSvc.GetPlanHistoryByLine(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}

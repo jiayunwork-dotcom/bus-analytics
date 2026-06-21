@@ -67,6 +67,7 @@ func main() {
 		api.DELETE("/plans/:id", h.DeletePlan)
 		api.PUT("/plans/:id/rename", h.RenamePlan)
 		api.POST("/plans/compare", h.ComparePlans)
+		api.GET("/plans/:id/history", h.GetPlanHistoryByLine)
 	}
 
 	r.GET("/health", func(c *gin.Context) {

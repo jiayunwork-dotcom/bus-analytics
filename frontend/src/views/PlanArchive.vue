@@ -11,6 +11,14 @@
         >
           开始对比
         </el-button>
+        <el-button
+          type="success"
+          :disabled="selectedPlans.length !== 1"
+          style="margin-left: 12px;"
+          @click="goTrend"
+        >
+          查看趋势
+        </el-button>
         <span v-if="selectedPlans.length > 0" style="margin-left: 12px; color: #909399; font-size: 13px;">
           已选 {{ selectedPlans.length }}/4 个方案
         </span>
@@ -166,6 +174,12 @@ const goPlanDetail = (id) => {
 const goCompare = () => {
   const ids = selectedPlans.value.map(p => p.id).join(',')
   router.push({ path: '/plan-compare', query: { ids } })
+}
+
+const goTrend = () => {
+  if (selectedPlans.value.length !== 1) return
+  const id = selectedPlans.value[0].id
+  router.push({ path: '/plan-compare', query: { ids: String(id), mode: 'trend' } })
 }
 
 const handleDelete = async (id) => {

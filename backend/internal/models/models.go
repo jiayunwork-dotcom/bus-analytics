@@ -351,3 +351,13 @@ type PlanRecommendation struct {
 	Reason   string `json:"reason"`
 }
 
+type PlanHistoryKPI struct {
+	ID                 int       `json:"id"`
+	Name               string    `json:"name"`
+	CreatedAt          time.Time `json:"created_at"`
+	DailyTrips         int       `json:"daily_trips"`
+	PeakLoadFactor     float64   `json:"peak_load_factor"`
+	OperatingSpeed     float64   `json:"operating_speed"`
+	PassengerIntensity float64   `json:"passenger_intensity"`
+}
+

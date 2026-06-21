@@ -391,6 +391,70 @@ func buildDiffRowAny(paramName string, vals []any, plans []models.SimPlan) model
 	return models.ParamDiffRow{ParamName: paramName, Values: values, Same: same}
 }
 
+func (s *PlanService) GetPlanHistoryByLine(planID int) ([]models.PlanHistoryKPI, error) {
+	plan, err := s.GetPlan(planID)
+	if err != nil {
+		return nil, fmt.Errorf("获取方案失败: %w", err)
+	}
+
+	lineNos := strings.Split(plan.Lines, ",")
+	if len(lineNos) == 0 {
+		return nil, fmt.Errorf("方案未涉及任何线路")
+	}
+
+	firstLine := lineNos[0]
+
+	rows, err := db.DB.Query(`
+		SELECT id, name, created_at, sim_type, result
+		FROM sim_plans
+		WHERE lines LIKE $1
+		ORDER BY created_at ASC
+	`, "%"+firstLine+"%")
+	if err != nil {
+		return nil, fmt.Errorf("查询历史方案失败: %w", err)
+	}
+	defer rows.Close()
+
+	var result []models.PlanHistoryKPI
+	for rows.Next() {
+		var item models.PlanHistoryKPI
+		var simType string
+		var resultJSON []byte
+		if err := rows.Scan(&item.ID, &item.Name, &item.CreatedAt, &simType, &resultJSON); err != nil {
+			continue
+		}
+
+		if simType == "single" {
+			var sr models.SimResult
+			if err := json.Unmarshal(resultJSON, &sr); err == nil {
+				item.DailyTrips = sr.NewKPI.DailyTrips
+				item.PeakLoadFactor = sr.NewKPI.PeakLoadFactor
+				item.OperatingSpeed = sr.NewKPI.OperatingSpeed
+				item.PassengerIntensity = sr.NewKPI.PassengerIntensity
+				result = append(result, item)
+			}
+		} else {
+			var jr models.JointSimResult
+			if err := json.Unmarshal(resultJSON, &jr); err == nil {
+				if len(jr.LineResults) > 0 {
+					for _, lr := range jr.LineResults {
+						if lr.LineNo == firstLine {
+							item.DailyTrips = lr.NewKPI.DailyTrips
+							item.PeakLoadFactor = lr.NewKPI.PeakLoadFactor
+							item.OperatingSpeed = lr.NewKPI.OperatingSpeed
+							item.PassengerIntensity = lr.NewKPI.PassengerIntensity
+							result = append(result, item)
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
 func (s *PlanService) buildRecommendations(items []models.SimPlanCompareItem) []models.PlanRecommendation {
 	if len(items) < 2 {
 		return nil

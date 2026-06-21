@@ -55,5 +55,6 @@ export default {
   getPlan: (id) => api.get(`/plans/${id}`),
   deletePlan: (id) => api.delete(`/plans/${id}`),
   renamePlan: (id, name) => api.put(`/plans/${id}/rename`, { name }),
-  comparePlans: (planIds) => api.post('/plans/compare', { plan_ids: planIds })
+  comparePlans: (planIds) => api.post('/plans/compare', { plan_ids: planIds }),
+  getPlanHistory: (planId) => api.get(`/plans/${planId}/history`)
 }
